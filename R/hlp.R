@@ -1,9 +1,6 @@
 ## TCOM Tool related helpers
 HLP <- new.env()
 
-## default values
-HLP$NAS <- c("", "NA", "N/A", "NULL", NA) # na-strings
-
 #' assign if not already exists
 HLP$"%:-%" <- function(x, y) 
 {
@@ -138,7 +135,7 @@ HLP$read.tsv <- function(f, ...)
 }
 HLP$readTSV <- HLP$read.tsv
 
-#' split {x} by {g}, apply {f}, and unsplit.
+#' split vector x by group g, apply function f, then unsplit.
 HLP$xgf <- function(x, g, f, ...) unsplit(lapply(split(x, g), f, ...), g)
 
 #' split {x} by {g}, tabluate unique values.
@@ -163,9 +160,13 @@ HLP$xgt <- function(x, g=NULL, na=NULL)
     r
 }
 
-#' proportion of unique values in a vector formated
+#' formated tally of counts and proportions of unique values.
 #'
-#' @param ttl totals (def="1")
+#' A wrapper of R function [table()].
+#'
+#' @param ... variable to calculate proportions.
+#' @param mrg.prp margins to add to proportions
+#' @param mrg.sum margins to add to sum(s)
 #' @param mrk marker (def=","), the thousand separator.
 HLP$ppf <- function(..., mrg.prp=NULL, mrg.sum=NULL, rnd=1)
 {
@@ -219,16 +220,18 @@ HLP$PF <- function(fmt, ...)
     invisible(c(msg, ..., recursive=FALSE))
 }
 
-#' emulated printf and with new lines
+#' emulated printf with new line
 HLP$PL <- function(fmt, ...)
 {
     msg <- if(missing(fmt)) "" else sprintf(fmt, ...)
     cat(format(msg), sep="\n")
     invisible(c(msg, ..., recursive=FALSE))
 }
+
+#' short hand for sprintf
 HLP$SP <- sprintf
 
-#' emulated file path
+#' short hand for file.path
 HLP$FP <- file.path
 
 #' short hand for data.frame
@@ -246,16 +249,6 @@ HLP$LL <- function(x, fmt=1)
         rpt <- format(rpt, justify="right", big.mark=",")
     rpt
 }
-## HLP$LL <- function(x, pfx=NULL)
-## {
-##     pfx %:-% ""
-##     nms <- names(x) |> format(justify="r")
-##     nrw <- sapply(x, NROW) |> format(justify="r", big.mark=",")
-##     ncl <- sapply(x, NCOL) |> format(justify="r", big.mark=",")
-##     osz <- sapply(x, object.size) |> as.integer() |>
-##         format(justify="r", big.mark=",")
-##     PL("%s%s: %s * %s, %s", pfx, nms, nrw, ncl, osz)
-## }
 
 
 #' praint a horizontal line
@@ -359,7 +352,7 @@ HLP$y2q <- function(x)
 #' @param dat the table to check, typically a R [data.frame].
 #' @param few how many elements to preview (def=4)
 #' @param len maximum word character length to preview (def=10).
-#' @param nas na-strings, (def={"", "NA", "N/A", "NULL"}).
+#' @param nas na-strings, def=c("", "NA", "N/A", "NULL").
 HLP$wck <- function(dat, few=4, len=10, nas=NULL)
 {
     if(is.null(nas))
