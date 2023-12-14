@@ -3,14 +3,8 @@ library(ggplot2)
 
 FIG <- local(
 {
-    RSZ %:-% 4.0 # render size
-    DIM %:-% 7.0 # canvas dimension
-    C2D %:-% 0.0 # contour 2D?
-    NEW %:-% 0   # overwrite figures?
-
-    ## internal helpers
-    ## color scale levels
-    clv <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver())
+    #' wrapper of color scales
+    .cs <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver())
     {
         pal <- substr(n, 3, 3) # palettte number
         typ <- substr(n, 2, 2) # type
@@ -35,7 +29,10 @@ FIG <- local(
         ret
     }
 
-    gsv <- function(g, out=NULL, dim=NULL, rsz=RSZ, new=NEW, bg=NULL, ...)
+    #' wrapper for ggsave
+    #'
+    #' Special care is taken to allow saving multi-page PDF.
+    gsv <- function(g, out=NULL, dim=NULL, rsz=NULL, dpi=NULL, new=0, bg=NULL, ...)
     {
         if(!is.null(out) && (!file.exists(out) || new))
         {
@@ -52,14 +49,14 @@ FIG <- local(
             if(sfx == "pdf")
                 arg <- c(arg, device=cairo_pdf, onefile=TRUE)
             ## save
-            arg <- c(arg, bg=bg, ...)
+            arg <- c(arg, dpi=dpi, bg=bg, ...) # additional arguments
             do.call(ggsave, arg)
         }
         invisible(g)
     }
 
-    LGP <- "none"
-    thm <- function(lgp=NULL)
+    #' default theme
+    .th <- function(lgp=NULL)
     {
         if(is.null(lgp)) # legend position
             lgp <- "none"
@@ -78,7 +75,7 @@ FIG <- local(
     }
 
     #' fortified data for ploting
-    dat <- function(x, y=NULL, z=NULL, a=NULL)
+    .fd <- function(x, y=NULL, z=NULL, a=NULL)
     {
         N <- length(x)
         if(is.null(y)) # y: y-axis
@@ -94,13 +91,13 @@ FIG <- local(
         data.frame(x, y, z, a)
     }
 
-    xoy <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0, out=NULL, dim=DIM, rsz=RSZ,
-                    zcl="hue", c2d=C2D, dct=NULL, ann=NULL)
+    #' X and Y as dots on 2D painted by Z.
+    xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, zcl="hue", c2d=0, dct=NULL, ann=NULL)
     {
-        pdt <- dat(x, y, z, a)                # fix data
-        rm(x, y, z, a)
+        pdt <- .fd(x, y, z, a)                # fix data
+        rm(x, y, z, a)                        # avoid local ambiguity
         map <- aes(x=x, y=y, color=z)         # main aesthetics
-        clr <- clv(pdt$z, zcl, "color", dct)  # color scheme
+        clr <- .cs(pdt$z, zcl, "color", dct)  # color scheme
         crd <- if(fxy) coord_flip() else NULL # flip x and y
         ## draw contour 2D?
         if(c2d > 0)
@@ -142,17 +139,16 @@ FIG <- local(
         }
         g <- g + clr + crd + c2d + ann
         g <- g + labs(x=NULL, y=NULL, color=NULL) + guides(alpha="none")
-        g <- g + thm(lgp)
-        ## print
-        gsv(g, out, dim, rsz)
+        g <- g + .th(lgp)
+        ## return
+        invisible(g)
     }
 
     ## histogram
-    hst <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0,
-                    out=NULL, dim=DIM, rsz=RSZ)
+    hst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0)
     {
         x <- if(fxy) y else x   # y as x?
-        pdt <- dat(x, z=z, a=a) # plot data
+        pdt <- .fd(x, z=z, a=a) # plot data
         map <- aes(x=x)         # main aesthetics
         hue <- NULL             # color hue
         crd <- if(fxy) coord_flip() else NULL
@@ -173,17 +169,16 @@ FIG <- local(
         g <- g + geom_histogram(bins=30)
         g <- g + labs(x=NULL, y=NULL, fill=NULL) + guides(alpha="none")
         ## ---- theme ----
-        g <- g + thm(lgp)
+        g <- g + .th(lgp)
         ## print
-        gsv(g, out, dim, rsz)
+        invisible(g)
     }
 
     ## density plot
-    dst <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0,
-                    out=NULL, dim=DIM, rsz=RSZ)
+    dst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0)
     {
         x <- if(fxy) y else x   # y as x?
-        pdt <- dat(x, z=z, a=a) # plot data
+        pdt <- .fd(x, z=z, a=a) # plot data
         map <- aes(x=x)         # aesthetics
         hue <- NULL             # hue for fill
         huc <- NULL             # hue for color
@@ -205,9 +200,9 @@ FIG <- local(
         g <- g + geo
         g <- g + labs(x=NULL, y=NULL, fill=NULL, color=NULL) + guides(alpha="none")
         ## ---- theme ----
-        g <- g + thm(lgp)
+        g <- g + .th(lgp)
         ## print
-        gsv(g, out, dim, rsz)
+        invisible(g)
     }
 
     #' bar chart
@@ -215,12 +210,10 @@ FIG <- local(
     #' @param txp text for percentage values.
     #' @param xcl x-color scheme (conditions)
     #' @param zcl z-color scheme (categories)
-    bar <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0, ttl=NULL,
-                    out=NULL, dim=DIM, rsz=RSZ,
-                    dct=NULL, zcl="hue")
+    bar <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="hue")
     {
         x <- if(fxy) y else x                    # y as x?
-        pdt <- dat(x, z=z, a=a)                  # plot data
+        pdt <- .fd(x, z=z, a=a)                  # plot data
         map <- aes(x=z)                          # aesthetics
         crd <- if(fxy) coord_flip() else NULL
         if(is.null(a))
@@ -248,7 +241,7 @@ FIG <- local(
         if(!is.null(z))
         {
             map <- c(map, aes(x=z, y=num, fill=z))
-            fcl <- clv(z, zcl, "fill") # fill by z (labels)
+            fcl <- .cs(z, zcl, "fill") # fill by z (labels)
             geo <- geom_col(alpha=a, linewidth=1)
         }
         else
@@ -268,9 +261,9 @@ FIG <- local(
         g <- ggplot(pdt, map) + fcl + crd
         g <- g + geo + ann + txt
         g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
-        g <- g + thm(lgp)
+        g <- g + .th(lgp)
         ## print
-        gsv(g, out, dim, rsz)
+        invisible(g)
     }
 
     #' box plot by group
@@ -278,20 +271,18 @@ FIG <- local(
     #' @param x values
     #' @param y values
     #' @param z group label
-    bxp <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0,
-                    out=NULL, dim=DIM, rsz=RSZ,
-                    zcl="hue", ...)
+    bxp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, zcl="hue")
     {
         x <- if(fxy) y else x    # y as x?
-        pdt <- dat(x, z=z, a=a)  # plot data
+        pdt <- .fd(x, z=z, a=a)  # plot data
         map <- aes(x=z, y=x)     # aesthetics: x-axis <- class; y-axis <- value
         crd <- if(fxy) coord_flip() else NULL
 
         ## colors and graphical elements
         a <- if(is.null(a)) mean(pdt$a) else mean(a) # one alpha for entire figure
         map <- c(map, aes(fill=z, color=z))
-        fcs <- FIG$clv(z, zcl, "fill")          # fill colour: z-class
-        lcs <- FIG$clv(z, zcl, "color")         # line colour: z-class
+        fcs <- FIG$.cs(z, zcl, "fill")          # fill colour: z-class
+        lcs <- FIG$.cs(z, zcl, "color")         # line colour: z-class
         geo <- geom_boxplot(alpha=a)
         ebr <- stat_boxplot(geom="errorbar", width = 0.20)
         class(map) <- "uneval"
@@ -318,9 +309,9 @@ FIG <- local(
         g <- g + geo + ebr + amd + aq1 + aq3
         g <- g + scale_x_discrete(drop=FALSE)
         g <- g + labs(x=NULL, y=NULL, fill=NULL) + guides(alpha="none")
-        g <- g + thm(lgp)
-        ## print
-        gsv(g, out, dim, rsz)
+        g <- g + .th(lgp)
+        ## return
+        invisible(g)
     }
 
     #' proportions of class z given x (mosasics)
@@ -329,14 +320,13 @@ FIG <- local(
     #'
     #' @param xcl x-color scheme (conditions)
     #' @param zcl z-color scheme (categories)
-    pzx <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0, ttl=NULL,
-                    out=NULL, dim=DIM, rsz=RSZ, 
+    pzx <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL,
                     xcl="hue", zcl="hue", ...)
     {
         x <- if(fxy) y else x    # y as x?
         crd <- if(fxy) coord_flip() else NULL
         ## plot data
-        pdt <- dat(x, y, z, a)
+        pdt <- .fd(x, y, z, a)
         a <- if(is.null(a)) mean(pdt$a) # alpha of all bars
         
         ## counts, proportions, and labels
@@ -357,8 +347,8 @@ FIG <- local(
         
         ## figure elements
         map <- aes(x=x, y=prp, color=x, fill=z) # aesthetics
-        fcs <- FIG$clv(z, zcl, "fill")          # fill colours: z-class
-        lcs <- FIG$clv(x, xcl, "colour")        # line colours: x-class
+        fcs <- FIG$.cs(z, zcl, "fill")          # fill colours: z-class
+        lcs <- FIG$.cs(x, xcl, "colour")        # line colours: x-class
         geo <- geom_col(aes(alpha=a), position=position_stack(reverse=1), linewidth=1)
         txt <- geom_text(aes(label=lbl), color="black",
                          position=position_stack(vjust=0.5, reverse=1), lineheight=0.8)
@@ -368,9 +358,9 @@ FIG <- local(
         g <- g + geo + txt + crd + fcs + lcs
         g <- g + scale_x_discrete(drop=FALSE)
         g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
-        g <- g + thm(lgp)
-        ## print
-        gsv(g, out, dim, rsz)
+        g <- g + .th(lgp)
+        ## return
+        invisible(g)
     }
 
     #' print legend only
@@ -378,12 +368,10 @@ FIG <- local(
     #' @param txp text for percentage values.
     #' @param xcl x-color scheme (conditions)
     #' @param zcl z-color scheme (categories)
-    lgz <- function(x, y, z=NULL, a=NULL, lgp=LGP, fxy=0, ttl=NULL,
-                    out=NULL, dim=DIM, rsz=RSZ,
-                    dct=NULL, zcl="hue")
+    lgz <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="hue")
     {
         x <- if(fxy) y else x                    # y as x?
-        pdt <- dat(x, z=z, a=a)                  # plot data
+        pdt <- .fd(x, z=z, a=a)                  # plot data
         map <- aes(x=z)                          # aesthetics
         crd <- if(fxy) coord_flip() else NULL
         if(is.null(a))
@@ -400,7 +388,7 @@ FIG <- local(
 
         ## plot elements
         map <- c(map, aes(x=0, y=0, fill=z))
-        fcl <- clv(z, zcl, "fill", dct) # fill by z (labels)
+        fcl <- .cs(z, zcl, "fill", dct) # fill by z (labels)
         geo <- geom_col(alpha=a, linewidth=1)
         class(map) <- "uneval"
         ## ---- make figure ----
@@ -427,38 +415,8 @@ FIG <- local(
 
         ## print
         g <- g + e
-        gsv(g, out, dim, rsz)
+        invisible(g)
     }
     
     environment()
 })
-
-#' load("fig_test_621.RData")
-#' FIG$xoy(pcs[, 1], pcs[, 2], lbl, rsz=3, fxy=0, out="xoy.png")
-#' FIG$hst(pcs[, 1], pcs[, 2], lbl, rsz=3, fxy=0, out="hsx.png")
-#' FIG$hst(pcs[, 1], pcs[, 2], lbl, rsz=3, fxy=1, out="hsy.png")
-#' FIG$dst(pcs[, 1], pcs[, 2], lbl, rsz=3, fxy=0, out="dsx.png")
-#' FIG$dst(pcs[, 1], pcs[, 2], lbl, rsz=3, fxy=1, out="dsy.png")
-#' FIG$bar(pcs[, 1], pcs[, 2], lbl, rsz=3, fxy=0, out="brz.png")
-
-## helper: pairwise figure colored
-FIG$pwf <- function(dat, clr=NULL, png=NULL, w=14, h=14)
-{
-    library(GGally)
-    if(is.null(clr))
-        clr <- "0"
-    clr <- rep(clr, length.out=nrow(dat))
-    if(!is.factor(clr))
-        clr <- factor(clr, unique(clr))
-    ## alp <- xgf(rep(1, nrow(dat)), clr, function(x) x / length(x))
-    alp <- rep(1, nrow(dat)) / nrow(dat)
-    dat <- data.frame(dat, clr)
-    ## .a <- 1 / nrow(.d)
-    g <- ggpairs(dat, aes(color=clr, alpha = alp), switch="y",
-                 lower = list(combo = wrap("facethist", binwidth = 0.5)))
-    g <- g + scale_color_hue(breaks=levels(clr), drop=FALSE)
-    g <- g + scale_fill_hue(breaks=levels(clr), drop=FALSE)
-    if(!is.null(png))
-        ggsave(png, g, width=w, height=h, scale=sqrt(0.5))
-    invisible(g)
-}
