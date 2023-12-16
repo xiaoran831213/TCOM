@@ -385,8 +385,8 @@ HLP$wck <- function(dat, few=4, len=10, nas=NULL)
 #' identifiable principle components
 #'
 #' 
-#' wrap R's prcomp() to ensure maximum positive span, so the
-#' principal components become identifiable.
+#' wrap  R's  prcomp()  to  ensure  maximum  positive  span,  so  the  principal
+#' components become identifiable.
 #'
 #' @param x data matrix to apply IPC.
 #' @param mxp ensure positive maximum span? (def=1)
@@ -398,6 +398,9 @@ HLP$ipc <- function(x, mxp=1, ...)
     ldv <- pca$rotation
     sdv <- pca$sdev
     cnt <- pca$center
+    colnames(pcs) <- sprintf("P%02X", 1:ncol(pcs))
+    colnames(ldv) <- colnames(pcs)
+    names(sdv)    <- colnames(pcs)
     if(mxp)
     {
         for(i in seq(ncol(pcs)))
