@@ -28,6 +28,7 @@ FIG <- local(
         }
         ret
     }
+    clv <- .cs
 
     #' wrapper for ggsave
     #'
@@ -207,9 +208,10 @@ FIG <- local(
 
     #' bar chart
     #'
-    #' @param txp text for percentage values.
-    #' @param xcl x-color scheme (conditions)
-    #' @param zcl z-color scheme (categories)
+    #' @param x (not used).
+    #' @param y (not used).
+    #' @param z class label.
+    #' @param zcl color scale for class label.
     bar <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="hue")
     {
         x <- if(fxy) y else x                    # y as x?
@@ -260,6 +262,53 @@ FIG <- local(
         ## ---- make figure ----
         g <- ggplot(pdt, map) + fcl + crd
         g <- g + geo + ann + txt
+        g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
+        g <- g + .th(lgp)
+        ## print
+        invisible(g)
+    }
+
+    #' col plot by group
+    #'
+    #' wrapper for ggplot geom_col(), suitable for showing loading vector.
+    #' @param x values (i.e., loading for PC1).
+    #' @param y values (i.e., loading for PC2).
+    #' @param z group label (not used)
+    col <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="bs2")
+    {
+        if(is.null(names(x)))
+            names(x) <- sprintf("X%02X", seq_along(x))
+        if(is.null(names(y)))
+            names(y) <- sprintf("Y%02X", seq_along(y))
+        x <- if(fxy) y else x                    # y as x?
+        ## specially treated plot data
+        if(is.numeric(z) && length(unique(z)) > 8)
+            z <- cut(z, breaks=8, ordered=TRUE)
+        if(is.null(a))
+            a <- 1.0
+        pdt <- .fd(x=factor(names(x), names(x)), y=x, z=z, a=a)
+
+        ## figure elements
+        map <- aes(x=x, y=y) # common aesthetics
+        crd <- if(fxy) coord_flip() else NULL
+        if(is.null(a))
+            a <- mean(pdt$a) # alpha of all bars
+        if(!is.null(z))
+        {
+            map <- c(map, aes(fill=z))
+            fcl <- .cs(z, zcl, "fill") # fill by z (labels)
+            geo <- geom_col(alpha=a, linewidth=1)
+        }
+        else
+        {
+            fcl <- NULL
+            geo <- geom_col(alpha=a, linewidth=1, fill="gray50")
+        }
+
+        class(map) <- "uneval"
+        ## ---- make figure ----
+        g <- ggplot(pdt, map) + fcl + crd
+        g <- g + geo # + ann + txt
         g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
         g <- g + .th(lgp)
         ## print
