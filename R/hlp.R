@@ -393,14 +393,18 @@ HLP$wck <- function(dat, few=4, len=10, nas=NULL)
 #' @param ... arguments to pass to prcomp().
 HLP$ipc <- function(x, mxp=1, ...)
 {
-    pca <- prcomp(x, ...)
-    pcs <- pca$x
-    ldv <- pca$rotation
-    sdv <- pca$sdev
-    cnt <- pca$center
-    colnames(pcs) <- sprintf("P%02X", 1:ncol(pcs))
+    ## if x is a PCA object, convert it to an IPC object
+    pca <- if(inherits(x, "prcomp")) x else prcomp(x, ...)
+    pcs <- pca$x        # score vectors (PCs)
+    sdv <- pca$sdev     # SD of scores
+    ldv <- pca$rotation # loading vectors use
+    cnt <- pca$center   # centers
+    ## naming 
+    colnames(pcs) <- sprintf("P%02X", 1:NCOL(pcs)) #
     colnames(ldv) <- colnames(pcs)
     names(sdv)    <- colnames(pcs)
+
+    ## enforce identifiablity by miximizing positive span on each scores (PCs) 
     if(mxp)
     {
         for(i in seq(ncol(pcs)))
@@ -409,30 +413,6 @@ HLP$ipc <- function(x, mxp=1, ...)
     }
     structure(list(pcs=pcs, ldv=ldv, sdv=sdv, cnt=cnt), class=c("ipc", "list"))
 }
-
-#' identifiable class labels
-#'
-#' A wrapper of R's [reorder()] to ensure consistant order of factor levels with
-#' principle components or any weighted coordinates.
-#'
-#' The order of  a level is dertermined by the  *aggregated proximity* of points
-#' in that level to the origin of the space defined by `pcs`, with dimensions in
-#' `pcs` weighted by `sdv`.
-#'
-#' By default, *proximity* to the origin is measured by Euclidian distance while
-#' *aggregation* is done by passing [FUN=median()] to [reorder()].
-#'
-#' @param lbl {n} points labeled by factor levels.
-#' @param pcs principle components or coordinates of label point.
-#' @param sdv explanable standard deviations or dimension weights.
-#' @param FUN function to calculated an aggregated proximity.
-HLP$icl <- function(lbl, pcs, ldv, sdv, cnt, FUN=median)
-{
-    dst <- sqrt((pcs^2 %*% (1/sdv^2)))
-    lbl <- reorder(lbl, dst, FUN)
-    lbl
-}
-HLP$ilv <- HLP$icl
 
 #' principal component label
 #'
@@ -454,13 +434,12 @@ HLP$ilv <- HLP$icl
 #' @param FUN function to calculated an aggregated proximity.
 HLP$pcl <- function(lbl, pcs, ldv, sdv, cnt, FUN=median)
 {
-    org <- drop(ldv %*% cnt)
+    org <- drop(ldv %*% cnt)       # origin in projected space
     pcs <- scale(pcs, -org, FALSE) # anti-center
     dst <- sqrt((pcs^2 %*% (1/sdv^2)))
     lbl <- reorder(lbl, dst, FUN)
     lbl
 }
-HLP$ilv <- HLP$icl
 
 #' turn a number to a date with system default origin.
 HLP$as_Date <- function(x, fmt=NULL, org=NULL, ...)
