@@ -149,16 +149,30 @@ HTM$b64_url <- function(fns, mda=NULL)
 #' {txt} can be another vector of HTML, for example, a list of images.
 HTM$b64_hrf <- function(fns, txt=NULL, att=NULL, sty=NULL, div=1)
 {
-    ## base64 encoded data URL(s)
-    url <- b64_url(fns)
+    url <- b64_url(fns) # base64 encoded data URL(s)
+    url_hrf(url, txt=txt, att=att, sty=sty, div=1)
+}
+
+#' write hyper link from URL.
+#'
+#' @param url file by url(s) or name(s) to hyper-link to.
+#' @param txt text to put in between <a ...> and </a> (def=filenames)
+#' @param att list of additional attributes
+#' @param sty list of styles
+#' @param div sandwich <a href=..> between <div> & </div>? (def=1)
+#' @return vector of <a href>..</a> linking each file.
+#'
+#' {txt} can be another vector of HTML, for example, a list of images.
+HTM$url_hrf <- function(url, txt=NULL, att=NULL, sty=NULL, div=1)
+{
     ## hyperlink text and download names
     if(length(txt) < 1)
-        txt <- names(fns)
+        txt <- names(url)
     if(length(txt) < 1)
-        txt <- fns
+        txt <- url
     ## add default download name
     if(!"download" %in% names(att))
-        att <- append(att, list(download=basename(fns)), 0)
+        att <- append(att, list(download=basename(url)), 0)
     att <- str_att(att)
     att <- if(length(att)) paste0(" ", att) else ""
     sty <- str_sty(sty)
@@ -172,7 +186,8 @@ HTM$b64_hrf <- function(fns, txt=NULL, att=NULL, sty=NULL, div=1)
 
 #' make base64 image from files.
 #'
-#' @param fns input filenames.
+#' Base64 image allowed embeded HTML to be distribution alone.
+#' @param fns image filename.
 #' @param w (in px) width 
 #' @param h (in px) height
 #' @param att list of additional attributes
@@ -180,8 +195,21 @@ HTM$b64_hrf <- function(fns, txt=NULL, att=NULL, sty=NULL, div=1)
 #' @param div sandwich <img src=..> between <div> & </div>? (def=0)
 HTM$b64_img <- function(fns, w=NULL, h=NULL, att=NULL, sty=NULL, div=0)
 {
-    ## base64 encoded data URL(s)
-    url <- b64_url(fns)
+    url <- b64_url(fns) # base64 encoded data URL(s)
+    url_img(url, w=w, h=h, att=att, sty=sty, div=div)
+}
+
+#' write image html based on filename.
+#'
+#' Named image allows tiny HTML not meant to distributed alone.
+#' @param img image by url(s) or name(s).
+#' @param w (in px) width
+#' @param h (in px) height
+#' @param att list of additional attributes
+#' @param sty list of styles
+#' @param div sandwich <img src=..> between <div> & </div>? (def=0)
+HTM$url_img <- function(url, w=NULL, h=NULL, att=NULL, sty=NULL, div=0)
+{
     ## compose html, handel attributes
     if(length(h) > 0)
         att <- append(att, list(height=h), 0)
@@ -237,7 +265,7 @@ HTM$str_sty <- function(...)
     sty
 }
 
-#' capture screen output as html
+#' capture screen output as pre-formated html
 #'
 #' @param ... expression to print out.
 #' @param att list of additional attributes
@@ -260,6 +288,7 @@ HTM$out_pre <- function(..., att=NULL, sty=NULL, div=0)
         htm <- sprintf("<div>%s</div>", htm)
     htm
 }
+HTM$pre_out <- HTM$out_pre
 
 #' make tabbed buttons
 #' 
