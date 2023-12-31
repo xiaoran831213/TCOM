@@ -1,6 +1,30 @@
 ## TCOM Tool - helpers for CANS alike data (require "hlp.R")
 CNS <- new.env()
 
+#' abberivations in 3 letters
+CNS$GLOSSARY <- 
+{
+    nfo <- c(
+        CID = "client: unique client id.",
+        UCN = "client: unique client number.",
+        SEX = "client: sex-male/female, trans-male/female.",
+        RAC = "client: race (EUR:White, AFR:Black, NAT:Native, ASN:Asian, RMX:mixed)",
+        ETH = "client: ethnicity (NSP:None-Hispanic, HSP:Hispanic)",
+        AOE = "client: age of enrollment",
+        DOE = "client: date of enrollment",
+        LOS = "client: total length of stay.",
+        NVS = "client: number of assessment.",
+        AOA = "visits: age  of assessment.",
+        DOA = "visits: date of assessment.",
+        DYS = "visits: days since enrollment.",
+        BTW = "visits: days between visits (days since previous visit).",
+        FVC = "visits: for-ward visit counter.",
+        BVC = "visits: backword visit counter.",
+        RSD = "visits: residence when assessed.")
+    nfo
+}
+CNS$GLS <- CNS$GLOSSARY
+
 #' add client-wise visit count to assessment meta-data.
 #' 
 #' @param cid client ID
@@ -136,6 +160,25 @@ CNS$scd <- function(val, clz, dmn, LVL=NULL)
     rpt <- within(rpt, prp <- xgf(num, clz %:% dmn, proportions))
     rpt
 }
+
+#' youth age group
+#'
+#' Break down age in years into commonly seen youth age groups.
+#' 
+#' @param x age in years
+#' @param drop drop empty groups (def=1)
+#' @return a R factor of age groups.
+CNS$yag <- function(x, drop=1)
+{
+    ## group age of enrollment / assessment
+    lvl <- c("<0DAY"=-1, "0M-1Y"=1, "1Y-5Y"=5, "6Y-8Y"=8, "9Y-12"=12,
+             "13-17"=17, "18-21"=21, "22Y&+"=Inf)
+    x <- cut(x, c(-Inf, lvl), labels=names(lvl))
+    if(drop)
+        x <- factor(x)
+    x
+}
+
 
 if("TCOM:CNS" %in% search())
     detach("TCOM:CNS")
