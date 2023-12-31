@@ -21,6 +21,30 @@ HLP$"%&!%" <- function(x, y) if(y) NULL else x
 #' x if y.
 HLP$"%&&%" <- function(x, y) if(y) x else NULL
 
+#' swap values in x and y
+#'
+#' @param x one symbol of the values to swap
+#' @param y one symbol of the values to swap
+#' @examples
+#' a <- "A"
+#' b <- "9"
+#' cat("a=", a, "; b=", b, " (prior) \n", sep="")
+#' swp(a, b)
+#' cat("a=", a, "; b=", b, " (after) \n", sep="")
+#' swp(a, b)
+#' cat("a=", a, "; b=", b, " (again) \n", sep="")
+HLP$swp <- function(x, y)
+{
+    env %:-% parent.frame()
+    a <- deparse(substitute(x))
+    b <- deparse(substitute(y))
+    x <- force(x) # local copy of original x
+    y <- force(y) # local copy of original y
+    assign(a, y, parent.frame())
+    assign(b, x, parent.frame())
+    invisible(list(x=x, y=y))
+}
+
 
 #' make and return deep directories without warning
 HLP$mkdir <- function(...)
@@ -463,6 +487,18 @@ HLP$as_Date <- function(x, fmt=NULL, org=NULL, ...)
     }
     ret
 }
+
+#' p-value to statistical significance by asterisks
+#'
+#' Use "." to highlight `p` < 0.05 and "*" the number of 0s past digit.
+#' @param p p-values
+#' @param d number of extra 0s to count (def=4).
+HLP$pvs <- function(p, d=4)
+{
+    as.character(cut(p, c(0, 10^((-d:-1) - 1), 0.05, 1),
+                     c(strrep("*", d:1) , ".", "")))
+}
+
 
 #' wrapper to calculate percentile instead of quantile
 HLP$percentile <- function(x, probs=seq(0, 1, 0.01))
