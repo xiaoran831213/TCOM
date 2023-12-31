@@ -1,6 +1,19 @@
 ## TCOM Tool related figures
 library(ggplot2)
+library(cowplot)
+library(reshape2)
+library(fcp)
 FIG <- new.env()
+
+#' number of lines in x
+#'
+#' Count of occurance of "new line" in x.
+#'
+#' NULL is counted as 1 line.
+FIG$.nl <- function(x)
+{
+    1 + sum(unlist(strsplit(as.character(x), "")) == "\n")
+}
 
 #' wrapper of color scales
 FIG$.cs <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver())
@@ -9,7 +22,15 @@ FIG$.cs <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver())
     typ <- substr(n, 2, 2) # type
     fun <- substr(n, 1, 1) # function name
     brk <- names(table(v)) # preserve the order of factor levels
-    dct <- if(length(dct) < 1) waiver() else dct
+    if(length(dct) < 1)
+        dct <- waiver()
+    else
+    {
+        .dc <- brk; names(.dc) <- brk
+        .dc[brk %in% names(dct)] <- dct[brk[brk %in% names(dct)]]
+        dct <-  .dc
+    }
+    
     ## use ggplot's Hue or Brewer?
     if(fun == "h") # hue
     {
@@ -34,7 +55,19 @@ FIG$.th <- function(lgp=NULL)
     if(is.null(lgp)) # legend position
         lgp <- "none"
     e <- theme_bw()
-    e <- e + theme(plot.title = element_text(margin=margin(0, 0, 0, 0)))
+
+    ## plot title inside the plot
+    h1 <- e$text$size * as.numeric(e$plot.title$size) ## + e$text$lineheight
+    e <- e + theme(plot.title=element_text(hjust=0.5, vjust=.5, margin=margin(b=-h1)))
+    
+    ## axis title inside the plot
+    h1 <- e$text$size                                # height of title
+    h2 <- as.numeric(e$text$size * e$axis.text$size) # height of text
+    h3 <- as.numeric(e$axis.ticks.length)            # height of ticks
+    e <- e + theme(axis.title.x=element_text(margin=margin(t=-h1-h2-h3, b=h2+h3), angle=0))
+    e <- e + theme(axis.title.y=element_text(margin=margin(l=h2+h3, r=-h1-h2-h3), angle=270))
+    
+    ## other themes
     e <- e + theme(legend.position=lgp, legend.justification=lgp)
     e <- e + theme(legend.background = element_blank())
     e <- e + theme(legend.margin = margin(1, 1, 1, 1))
@@ -50,15 +83,25 @@ FIG$.th <- function(lgp=NULL)
 #' fortified data for ploting
 FIG$.fd <- function(x, y=NULL, z=NULL, a=NULL)
 {
+    ## assign default values
+    y %:-% x
+    z %:-% "ALL"
+    a %:-% 1.0
+    ## retain label z
+    lvl <- levels(z)
+    ## drop data frame or matrix format
+    x <- drop(unlist(x))
+    y <- drop(unlist(y))
+    z <- drop(unlist(z))
+    a <- drop(unlist(a))
+    ## retore label z
+    if(length(lvl))
+        z <-factor(z, lvl)
+    ## 
     N <- max(length(x), length(y), length(z), length(a))
-    if(is.null(y)) # y: y-axis
-        y <- x
+    x <- rep(x, length.out = N)
     y <- rep(y, length.out = N)
-    if(is.null(z)) # z: labels
-        z <- "ALL"
     z <- rep(z, length.out = N) |> as.factor()
-    if(is.null(a)) # a: alpha transparency
-        a <- sqrt(1 / max(1, nlevels(z)))
     a <- rep(a, length.out = N)
     ## combine
     data.frame(x, y, z, a)
@@ -69,61 +112,67 @@ FIG$.fd <- function(x, y=NULL, z=NULL, a=NULL)
 #' @param x x-axis of n samples
 #' @param y y-axis of n samples
 #' @param z labels of n samples (categorical).
-#' @param a alpha-values (transparency).
-#' @param lgp legend position from bottom-left (0, 0) to top-right (1, 1). (def=NULL)
+#' @param a alpha-value (transparency).
+#' @param lgp legend position from bottom-left (0, 0) to top-right (1, 1) (def=NULL).
+#' @param fxy flip x and y axis (def=0).
+#' @param ttl figure title (def=NULL, use symbol or column name of z)
+#' @param xlb x-axis label (def=NULL, use symbol or column name of x)
+#' @param ylb y-axis label (def=NULL, use symbol of column name of y)
 #' @param zcl color scheme to paint labels (def="hue")
-#' @param c2d the opacity of contour 2D (0=none, 1=fully visible)
-#' @param dct dictionary for labels (change legend label)
-#' @param ann annotation for labels (show in main figure)
-FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, zcl="hue", c2d=0, dct=NULL, ann=NULL, rsz=1)
+#' @param c2d width and opacity of contour 2D (def=c(0, 0))
+#' @param dct label dictionary to translate legend and text.
+#' @param ann label annotation to show up in the figure.
+FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
+                    c2d=0, dct=NULL, ann=NULL, xlb=NULL, ylb=NULL, ...)
 {
-    a <- if(is.null(a)) 1 else a          #
-    pdt <- .fd(x, y, z, a)                # fix data
-    rm(x, y, z, a)                        # avoid local ambiguity
-    map <- aes(x=x, y=y, color=z)         # main aesthetics
-    clr <- .cs(pdt$z, zcl, "color", dct)  # color scheme
-    crd <- if(fxy) coord_flip() else NULL # flip x and y
-
+    ## ------------ fix data object and retrieve their symbols ------------- ##
+    xlb %:-% names(eval(call("DF", substitute(x), check.names=0), parent.frame()))
+    ylb %:-% names(eval(call("DF", substitute(y), check.names=0), parent.frame()))
+    upk(.fd(x, y, z, a)) # unpack fixed x, y, z, and a
+    
+    ## ---------------------------- make figure ---------------------------- ##
+    csz <- .cs(z, zcl, "color", dct) # color scheme
+    crd <- coord_flip() %&&% fxy     # flip x and y
     ## draw contour 2D?
-    if(c2d > 0)
+    if(length(c2d) && c2d[1] > 0)
     {
-        gsz <- with(pdt, unsplit(lapply(split(z, z), length), z)) # group size
+        c2d <- rep(c2d, 2)
+        gsz <- unsplit(lapply(split(z, z), length), z) # group size
         ## break ties so bandwidth.nrd can "normally" guessed the bandwidth 
         c2d <- geom_density_2d(
-            aes(x=jitter(x, .1, 0), y=jitter(y, .1, 0), group=z),
-            data=~subset(.x, gsz > 5),
-            alpha=c2d, color="gray40", contour_var="ndensity", linewidth=.5/sqrt(rsz))
+            aes(x=jitter(x, sd(x) / 100, 0),
+                y=jitter(y, sd(Y) / 100, 0), group=z),
+            data=~subset(.x, gsz > 5), # skip tiny classes
+            linewidth=c2d[1], alpha=c2d[2], color="gray40",
+            contour_var="ndensity")
     }
     else
         c2d <- NULL
-
     ## annotate?
     if(length(ann))
     {
-        ax <- with(pdt, tapply(x, z, mean))
-        ay <- with(pdt, tapply(y, z, mean))
+        ax <- tapply(x, z, mean)
+        ay <- tapply(y, z, mean)
         al <- names(ax)
         if(is.character(ann) && length(ann) >= length(al))
             al <- ann[al]
         ann <- annotate("text", x=ax, y=ay, label=al, hjust=1, vjust=.5)
-        ## angle=90 * (1 - fxy), lineheight=.8
     }
     else
         ann <- NULL
-    
-    ## ---- make figure ----
-    g <- ggplot(pdt, map)
-    A <- unique(pdt$a)
-    if(length(A) > 1)
+
+    ## use ggplot
+    if(nlevels(z) == 1 && levels(z) == "ALL")
     {
-        g <- g + geom_point(aes(alpha=a))
+        geo <- geom_point(alpha=mean(a))
     }
     else
     {
-        g <- g + geom_point(alpha=A)
+        geo <- geom_point(aes(color=z), alpha=mean(a))
     }
-    g <- g + clr + crd + c2d + ann
-    g <- g + labs(x=NULL, y=NULL, color=NULL) + guides(alpha="none")
+    g <- ggplot(mapping=aes(x, y)) + geo
+    g <- g + csz + crd + c2d + ann
+    g <- g + labs(x=xlb, y=ylb, title=ttl, color=NULL) + guides(alpha="none")
     g <- g + .th(lgp)
     ## return
     invisible(g)
@@ -159,34 +208,51 @@ FIG$hst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0)
     invisible(g)
 }
 
-## density plot
-FIG$dst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, zcl="hue")
+#' one dimensional density plot
+#' @param x x-axis of n samples, act as support if fxy=0, otherwise unused.
+#' @param y y-axis of n samples, act as support if fxy=1, otherwise unused.
+#' @param z labels of n samples (categorical).
+#' @param a alpha-value (transparency).
+#' @param lgp legend position (bottom-left [0,0] to top-right [1,1], def=NULL).
+#' @param fxy flip x and y (def=0, x is the support, y is unused).
+#' @param ttl figure title (def=<symbol/hearder of x if fxy=0 or y if fxy=1>)
+#' @param xlb x-axis label for support if fxy=0 (def="").
+#' @param ylb y-axis label for support if fxy=1 (def="").
+#' @param dlb density label (def="")
+#' @param zcl color scheme to paint labels (def="hue").
+FIG$dst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
+                    xlb=NULL, ylb=NULL, dlb=NULL)
 {
-    x <- if(fxy) y else x   # y as x?
-    pdt <- .fd(x, z=z, a=a) # plot data
-    map <- aes(x=x)         # aesthetics
-    crd <- if(fxy) coord_flip() else NULL
-    z <- pdt$z
-    a <- if(is.null(a)) mean(pdt$a) else mean(a)
-    if(!is.null(z))
+    ## -------------------------- retain symbols --------------------------- ##
+    X %:-% names(eval(call("DF", substitute(x), check.names=0), parent.frame()))
+    Y %:-% names(eval(call("DF", substitute(y), check.names=0), parent.frame()))
+    ## -------------------------- fix data objects ------------------------- ##
+    upk(.fd(x, y, z, a)) # unpack fixed x, y, z, and a
+    ## ---------------------------- make figure ---------------------------- ##
+    crd <- NULL
+    if(fxy) # flip x and y?
     {
-        map <- c(map, aes(color=z, fill=z))
-        hue <- .cs(z, zcl, "fill")  # scale_fill_hue(breaks=levels(z), drop=FALSE)
-        huc <- .cs(z, zcl, "color") # scale_color_hue(breaks=levels(z), drop=FALSE)
-        geo <- geom_density(alpha=a)
+        crd <- coord_flip()
+        swp(x, y)
+        swp(X, Y)
+        swp(xlb, ylb)
     }
-    else
+    ttl %:-% X # symbol/header of support as default title
+    ylb <- dlb # density label as y-axis label.
+    cs1 <- .cs(z, zcl, "fill")  # color to fill
+    cs2 <- .cs(z, zcl, "color") # color to draw
+    ## the main aesthenics is density
+    if(nlevels(z) == 1 && levels(z) == "ALL")
     {
-        hue <- NULL             # hue for fill
-        huc <- NULL             # hue for color
-        geo <- geom_density(fill="gray", alpha=a)
-    }
-    class(map) <- "uneval"
-    ## ---- make figure ----
-    g <- ggplot(pdt, map) + hue + huc + crd
-    g <- g + geo
-    g <- g + labs(x=NULL, y=NULL, fill=NULL, color=NULL) + guides(alpha="none")
-    ## ---- theme ----
+        geo <- geom_density(fill="black", alpha=mean(a))
+    } else {
+        geo <- geom_density(aes(color=z, fill=z), alpha=mean(a))
+    } 
+    ## compose ggplot
+    g <- ggplot(NULL, aes(x=x)) + geo
+    g <- g + cs1 + cs2 + crd
+    g <- g + labs(x=xlb, y=ylb, fill=NULL, color=NULL, title=ttl) +
+        guides(alpha="none")
     g <- g + .th(lgp)
     ## print
     invisible(g)
@@ -398,6 +464,169 @@ FIG$pzx <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, xcl="hue", 
     ## return
     invisible(g)
 }
+
+#' table plot
+#'
+#' print a table as it is.
+#'
+#' An entry may contain multiple row records.
+#' @param x data frame to plot, each row is a record.
+#' @param y data frame to identify entries (def=NULL, each row is an entry).
+#' @param z vector of row labels that affects color (def=NULL, no color).
+#' @param a alpha of table background transparency (def=0.3).
+FIG$tbp <- function(x, y=NULL, z=NULL, a=0.3)
+{
+    stopifnot(NROW(x) == NROW(y) || length(y) == 0)
+    stopifnot(NROW(x) == NROW(z) || length(z) == 0)
+    ## data enchancement
+    x <- eval(call("DF", substitute(x), check.names=FALSE), parent.frame())
+    x <- format(x, justify="l", big.mark=",")
+    y <- eval(call("DF", substitute(y), check.names=FALSE), parent.frame())
+    y <- format(y, justify="l", big.mark=",")
+    Y <- do.call(paste, c(y, list(sep=":"))) # shared row coordinate
+    if(!length(Y))
+        Y <- rownames(x)
+    if(is.null(a)) # alpha / transparency
+        a <- 0.3
+    ## common plot elements
+    PD <- position_dodge2(width=1, preserve="total", padding=0)
+    EX <- rep(0, 4)
+    e <- theme_bw() +
+        theme(
+            panel.grid=element_blank(),        # no coord grids
+            axis.title.y=element_blank(),      #
+            axis.text.y=element_blank(),       #
+            axis.ticks.y=element_blank(),      #
+            axis.ticks.length.y=unit(0, "pt"), # no border space
+            ## axis.ticks.x=element_line(color="#00000000"),
+            axis.text.x=element_text(face="bold", family="sans"),
+            axis.title.x=element_blank(),
+            plot.margin = margin(0, 0, 0, 0, unit="pt"))
+
+    ## plot leading column in y
+    fgy <- sapply(names(y), function(.)
+    {
+        g <- ggplot(NULL, aes(x=0, y=Y, label=y[, .]), hjust=0)
+        g <- g + geom_tile(fill="grey40", color="black", alpha=a)
+        g <- g + geom_text(family="mono")
+        g <- g + scale_x_continuous(breaks=0, labels=., expand=EX)
+        g <- g + scale_y_discrete(expand=rep(0, 4))
+        g + e
+    }, simplify=FALSE)
+    ncy <- sapply(y, nchar %.% max(na.rm=TRUE))
+    ncy <- unlist(ncy) # in case y is an empty list
+    
+    ## plot measure column in x
+    fgx <- sapply(names(x), function(.)
+    {
+        g <- ggplot(NULL, aes(x=0, y=Y, label=x[, .]), hjust=0)
+        g <- g + geom_tile(aes(fill=z), alpha=a, position=PD) # one raw
+        g <- g + geom_tile(color="black", fill=NA)            # one entry
+        g <- g + geom_text(family="mono", position=PD)        # cell text
+        g <- g + scale_x_continuous(breaks=0, labels=., expand=EX)
+        g <- g + scale_y_discrete(expand=EX) + guides(fill="none")
+        g + e
+    }, simplify=FALSE)
+    ncx <- sapply(x, nchar %.% max(na.rm=TRUE))
+    ncx <- unlist(ncx) # in case y is an empty list
+    
+    ## combined plot
+    plot_grid(plotlist=c(fgy, fgx), nrow=1, rel_widths=c(ncy, ncx))
+}
+
+#' odds ratio plot
+#'
+#' a forest plot of odds ratios and confidence intervals.
+#'
+#' An entry may contain multiple row records.
+#' @param x data frame of odds ratio, upper and lower 95%CI.
+#' @param y data frame to identify entries (def=NULL, each row is an entry).
+#' @param z vector of row labels that affects color (def=NULL, no color).
+#' @param cap cap odds ratio grater  then this (def=NULL, 95 percential round up
+#'     to half-unit).
+#' @param lgp legend position (def=NULL, invisible)
+FIG$orp <- function(x, y=NULL, z=NULL, a=NULL, cap=NULL, lgp=NULL)
+{
+    stopifnot(NCOL(x) >= 3)
+    stopifnot(NROW(x) == NROW(y) || length(y) == 0)
+    stopifnot(NROW(x) == NROW(z) || length(z) == 0)
+    ## data enchancement
+    o.r <- x[, 1] # odds ratio
+    clw <- x[, 2] # ci lower
+    cup <- x[, 3] # ci upper
+    y <- eval(call("DF", substitute(y), check.names=FALSE), parent.frame())
+    y <- format(y, justify="l", big.mark=",")
+    Y <- do.call(paste, c(y, list(sep=":"))) # shared row coordinate
+    if(!length(Y))
+        Y <- rownames(x)
+    if(is.null(a)) # alpha / transparency
+        a <- 0.5
+    if(is.null(cap))
+        cap <- ceiling(quantile(cup, .95) * 100 / 95 * 2) / 2
+    ## common plot elements
+    PD <- position_dodge2(width=.9, preserve="single", padding=0)
+    EX <- rep(0, 4)        # coordinate expansion
+    XB <- c(0, .5, 1, cap) # x-axis breaks and labels
+    XL <- c("   0", "0.5", "1", paste0(cap, strrep(" ", nchar(cap)*2)))
+    e <- theme_bw() +
+        theme(
+            panel.grid=element_blank(),        # no coord grids
+            axis.title.y=element_blank(),      #
+            axis.text.y=element_blank(),       #
+            axis.ticks.y=element_blank(),      #
+            axis.ticks.length.y=unit(0, "pt"), # no border space
+            axis.text.x=element_text(face="bold", family="sans"),
+            axis.title.x=element_blank(),
+            plot.margin = margin(0, 0, 0, 0, unit="pt"))
+    ## legend
+    lgp <- if(length(lgp)) rep(lgp, length.out=2) else "none"
+    e <- e + theme(legend.position=lgp, legend.justification=lgp,
+                   legend.margin=margin(0, unit="pt"))
+    ## make the forest plot
+    g <- ggplot(NULL, aes(x=o.r, y=Y, color=z))
+    g <- g + geom_vline(xintercept=c(0, .5, 1), linetype=c(1, 2, 1),
+                        linewidth=c(.5, .2, .2), alpha=a)
+    g <- g + geom_point(size=4, position=PD)
+    g <- g + geom_errorbar(aes(xmin=clw, xmax=cup), position=PD, width=.8)
+    g <- g + geom_tile(aes(x=cap/2, width=cap), color="black", fill=NA)
+    g <- g + scale_x_continuous(breaks=XB, labels=XL, expand=EX)
+    g <- g + scale_y_discrete(expand=EX)
+    g <- g + labs(color=NULL)
+    g <- g + coord_cartesian(xlim=c(0, cap))
+    g <- g + e
+    g
+}
+
+#' table plot (experimental)
+#'
+#' Attemp to re-implement `tbp()` with ggplot2 only.
+FIG$.tbp. <- function(x, y=NULL, z=NULL)
+{
+    ## data enchancement
+    x <- format(as.data.frame(x, check.names=FALSE), justify="l", big.mark=",")
+    dat <- DF(y, z, x)
+    dat <- melt(dat, id.vars=1:2, variable.name="x", value.name="v")
+    PD <- position_dodge(width=1, preserve="total")
+    e <- theme_bw() +
+        theme(
+            panel.grid=element_blank(),        # no coord grids
+            axis.title.y=element_blank(),      #
+            axis.text.y=element_blank(),       #
+            axis.ticks.y=element_blank(),      #
+            axis.ticks.length.y=unit(0, "pt"), # no border space
+            axis.text.x=element_text(face="bold", family="sans"),
+            axis.title.x=element_blank(),
+            plot.margin = margin(0, 0, 0, 0, unit="pt"))
+    g <- ggplot(dat, aes(x=x, y=y, label=v, fill=z), alpha=.1, hjust=0)
+    g <- g + geom_tile(alpha=.1, color="black", position=PD)
+    g <- g + geom_text(aes(color=z), family="mono", position=PD)
+    ## g <- g + geom_tile(aes(width=5, group=y), fill=NA, color="black")
+    g <- g + scale_x_discrete(expand=rep(0, 4))
+    g <- g + scale_y_discrete(expand=rep(0, 4))
+    g <- g + e
+    g
+}
+
 
 #' print only legend for categories in z.
 #'
