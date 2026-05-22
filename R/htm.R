@@ -150,6 +150,8 @@ HTM$b64_url <- function(fns, mda=NULL)
 HTM$b64_hrf <- function(fns, txt=NULL, att=NULL, sty=NULL, div=1)
 {
     url <- b64_url(fns) # base64 encoded data URL(s)
+    if(!"download" %in% names(att))
+        att <- append(att, list(download=basename(fns)))
     url_hrf(url, txt=txt, att=att, sty=sty, div=1)
 }
 

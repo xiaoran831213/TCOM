@@ -1,27 +1,24 @@
 ## TCOM Tool related figures
 library(ggplot2)
 library(cowplot)
-library(reshape2)
 library(fcp)
 FIG <- new.env()
 
-#' number of lines in x
-#'
-#' Count of occurance of "new line" in x.
-#'
-#' NULL is counted as 1 line.
-FIG$.nl <- function(x)
-{
-    1 + sum(unlist(strsplit(as.character(x), "")) == "\n")
-}
+#colorblind-friendly color palette
+CBF <- c("#0072B2","#9467BD","#E69F00", "#D55E00","#CC79A7", "#E69F00",
+         "#009E73", "#56B4E9")
 
 #' wrapper of color scales
-FIG$.cs <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver())
+FIG$.cs <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver(), dir=1, nav="grey50")
 {
-    pal <- substr(n, 3, 3) # palettte number
-    typ <- substr(n, 2, 2) # type
-    fun <- substr(n, 1, 1) # function name
+    if("Scale" %in% class(n))
+        return(n)
+    ## handel breaks
     brk <- names(table(v)) # preserve the order of factor levels
+    if(is.numeric(v))
+        brk <- as.numeric(brk)
+
+    ## handle dictionary translation
     if(length(dct) < 1)
         dct <- waiver()
     else
@@ -32,48 +29,137 @@ FIG$.cs <- function(v, n="hue", aes="fill", dct=NULL, ttl=waiver())
     }
     
     ## use ggplot's Hue or Brewer?
-    if(fun == "h") # hue
+    n %:-% "0"
+    if(n == "hue")
     {
-        ret <- scale_fill_hue(
-            breaks=brk, drop=0, direction=1, aesthetics=aes, labels=dct,
-            name=ttl)
+        ret <- scale_color_hue(
+            breaks=brk, labels=dct, na.value = nav, name=ttl, drop=0,
+            direction=dir, aesthetics=aes)
     }
-    else # brewer
+    else if(substr(n, 1, 1) == "g") # gr[0-9][0-9] gray scale
     {
-        typ <- c(d="div", q="qua", s="seq")[typ]
-        pal <- suppressWarnings(as.integer(pal))
+        a <- substr(n, 2, 2)                                  # start
+        a <- ifelse(grepl("[0-9]", a), as.integer(a)/10, 0.2) # 
+        b <- substr(n, 3, 3)                                  # end
+        b <- ifelse(grepl("[0-9]", b), as.integer(b)/10, 1-a) # 
+        if(dir < 0)
+            swp(a, b)
+        ret <- scale_color_grey(
+            start=a, end=b,
+            breaks=brk, labels=dct, na.value=nav, name=ttl, aesthetics=aes)
+    }
+    else if(substr(n, 1, 1) == "b") # brewer: bd#, bq# or bs#
+    {
+        pal <- suppressWarnings(as.integer(substr(n, 3, 3))) # palette number
+        typ <- c(d="div", q="qua", s="seq")[substr(n, 2, 2)] # palette type
         ret <- scale_colour_brewer(
-            breaks=brk, drop=0, direction=1, aesthetics=aes, labels=dct,
-            name=ttl, type=typ, palette=pal, na.value = "grey50")
+            breaks=brk, labels=dct, na.value=nav, name=ttl, drop=0,
+            type=typ, palette=pal, direction=dir, aesthetics=aes)
+    }
+    else if(substr(n, 1, 2) == "st") # steps: st#
+    {
+        if(substr(n, 3, 3) <= 1) # single gradient
+        {
+            ## by default, put lighter color ahead
+            a <- formals(scale_color_gradient)$high # lighter color
+            b <- formals(scale_color_gradient)$low  # darker color
+            if(dir < 0)
+                swp(a, b) 
+            ret <- scale_color_steps(
+                low=a, high=b,
+                breaks=brk, labels=dct, na.value=nav, name=ttl, aesthetics=aes)
+        }
+        else # with mid-point
+        {
+            ret <- scale_color_steps2(
+                breaks=brk, labels=dct, na.value=nav, name=ttl, aesthetics=aes,
+                midpoint=median(v))
+        }
+    }
+    else if(substr(n, 1, 1) == "v") # viridis_(c|d)([a-e]|[A-H])
+    {
+        opt <- substr(n, 3, 3)
+        ## lighter color come first, unless opt is upper case
+        a <- formals(scale_colour_viridis_c)$end   # lighter color
+        b <- formals(scale_colour_viridis_c)$begin # darker color
+        if(grepl("[A-Z]", opt))                  
+            swp(a, b)
+        if(substr(n, 2, 2) == "c")
+        {
+            ret <- scale_colour_viridis_c(
+                begin=a, end=b, na.value=nav,
+                direction=dir, option=toupper(opt), aesthetics=aes)
+        }
+        else
+        {
+            ret <- scale_colour_viridis_d(
+                begin=a, end=b, na.value=nav,
+                direction=dir, option=toupper(opt), aesthetics=aes)
+        }
+    }
+    else
+    {
+        if(is.numeric(v)) # default for numeric x
+        {
+            ## lighter color come first (against ggplot default)
+            a <- formals(scale_color_gradient)$high # lighter color
+            b <- formals(scale_color_gradient)$low  # darker color
+            if(dir < 0)                             # realize direction
+                swp(a, b)
+            ret <- scale_color_gradient(low=a, high=b, aesthetics=aes)
+        }
+        if(is.ordered(v)) # default for ordinal x
+        {
+            ## lighter color come first (against ggplot default)
+            ret <- scale_colour_viridis_d(
+                begin=1, end=0, na.value=nav,
+                direction=dir, option="G", aesthetics=aes)
+        }
+        else # default for categorical x
+        {
+            ret <- scale_color_hue(
+                breaks=brk, labels=dct, name=ttl, drop=0,
+                direction=dir, aesthetics=aes)
+        }
     }
     ret
 }
 
 #' default theme
-FIG$.th <- function(lgp=NULL)
+FIG$.th <- function(lgp=c("none", "left", "right", "bottom", "top"))
 {
-    if(is.null(lgp)) # legend position
+    ## place the legend
+    if(length(lgp) < 1) # empty
         lgp <- "none"
+    if(is.numeric(lgp))    # inside the plotting frame
+        lgp <- c(lgp, rep(0, 2 - length(lgp)))[1:2]
+    if(is.character(lgp))
+        lgp <- match.arg(lgp[1], c("none", "left", "right", "bottom", "top"))
     e <- theme_bw()
 
     ## plot title inside the plot
-    h1 <- e$text$size * as.numeric(e$plot.title$size) ## + e$text$lineheight
+    h1 <- e$text$size * as.numeric(e$plot.title$size) - e$text$lineheight # - e$line$linewidth
     e <- e + theme(plot.title=element_text(hjust=0.5, vjust=.5, margin=margin(b=-h1)))
     
     ## axis title inside the plot
     h1 <- e$text$size                                # height of title
     h2 <- as.numeric(e$text$size * e$axis.text$size) # height of text
-    h3 <- as.numeric(e$axis.ticks.length)            # height of ticks
-    e <- e + theme(axis.title.x=element_text(margin=margin(t=-h1-h2-h3, b=h2+h3), angle=0))
-    e <- e + theme(axis.title.y=element_text(margin=margin(l=h2+h3, r=-h1-h2-h3), angle=270))
+    h3 <- as.numeric(e$axis.ticks.length)            # length of ticks
+    h4 <- as.numeric(e$line$linewidth)               # line width
+    e <- e + theme(axis.title.x=element_text(margin=margin(t=-h1-h2-h3, b=+h2+h3),
+                                             vjust=1.0))
+    e <- e + theme(axis.title.y=element_text(margin=margin(l=h2+h3+h4, r=-h1-h2-h3-h4),
+                                             vjust=0.0))
     
     ## other themes
     e <- e + theme(legend.position=lgp, legend.justification=lgp)
-    e <- e + theme(legend.background = element_blank())
+    if(is.numeric(lgp))
+        e <- e + theme(legend.background = element_rect(color="black", linewidth=rel(0.5)))
     e <- e + theme(legend.margin = margin(1, 1, 1, 1))
     e <- e + theme(legend.box.margin = margin(0, 0, 0, 0))
-    e <- e + theme(axis.text.y = element_text(angle=270, hjust=.5))
-    e <- e + theme(plot.margin = margin(1, 1, 1, 1))
+    e <- e + theme(axis.text.y = element_text(angle=90, hjust=.5))
+    ## e <- e + theme(plot.margin = margin(1, 1, 1, 1))
+    e <- e + theme(plot.margin = margin(0, 0, 0, 0))
     e <- e + theme(strip.text=element_blank())
     e <- e + theme(panel.spacing=unit(0, "pt"))
     e <- e + theme(panel.spacing=unit(0, "pt"))
@@ -113,7 +199,7 @@ FIG$.fd <- function(x, y=NULL, z=NULL, a=NULL)
 #' @param y y-axis of n samples
 #' @param z labels of n samples (categorical).
 #' @param a alpha-value (transparency).
-#' @param lgp legend position from bottom-left (0, 0) to top-right (1, 1) (def=NULL).
+#' @param lgp legend position (def="none")
 #' @param fxy flip x and y axis (def=0).
 #' @param ttl figure title (def=NULL, use symbol or column name of z)
 #' @param xlb x-axis label (def=NULL, use symbol or column name of x)
@@ -122,15 +208,20 @@ FIG$.fd <- function(x, y=NULL, z=NULL, a=NULL)
 #' @param c2d width and opacity of contour 2D (def=c(0, 0))
 #' @param dct label dictionary to translate legend and text.
 #' @param ann label annotation to show up in the figure.
+#'
+#' `lgp` specifies the position of legend,  can be of c("none", "left", "right",
+#' "bottom", "top") outside of the plotting area,  or two numbers from c(0, 0) -
+#' bottom-left to c(1, 1) top-right inside of the plotting area.
 FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
-                    c2d=0, dct=NULL, ann=NULL, xlb=NULL, ylb=NULL, ...)
+                    zsh=NULL, c2d=0, dct=NULL, ann=NULL, xlb=NULL, ylb=NULL, ...)
 {
     ## ------------ fix data object and retrieve their symbols ------------- ##
-    xlb %:-% names(eval(call("DF", substitute(x), check.names=0), parent.frame()))
-    ylb %:-% names(eval(call("DF", substitute(y), check.names=0), parent.frame()))
+    xlb %:-% names(eval(call("DF", substitute(x)), parent.frame()))
+    ylb %:-% names(eval(call("DF", substitute(y)), parent.frame()))
     upk(.fd(x, y, z, a)) # unpack fixed x, y, z, and a
     
     ## ---------------------------- make figure ---------------------------- ##
+    ttl %:-% ""
     csz <- .cs(z, zcl, "color", dct) # color scheme
     crd <- coord_flip() %&&% fxy     # flip x and y
     ## draw contour 2D?
@@ -138,11 +229,12 @@ FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
     {
         c2d <- rep(c2d, 2)
         gsz <- unsplit(lapply(split(z, z), length), z) # group size
-        ## break ties so bandwidth.nrd can "normally" guessed the bandwidth 
+        ## to ensure bandwidth.nrd "normally"  guessed the bandwidth, (1) break
+        ## ties in x and y, (2) remove tiny and NA groups.
         c2d <- geom_density_2d(
             aes(x=jitter(x, sd(x) / 100, 0),
-                y=jitter(y, sd(Y) / 100, 0), group=z),
-            data=~subset(.x, gsz > 5), # skip tiny classes
+                y=jitter(y, sd(y) / 100, 0), group=z),
+            data = data.frame(x, y, z)[!is.na(gsz) & gsz > 5, ], 
             linewidth=c2d[1], alpha=c2d[2], color="gray40",
             contour_var="ndensity")
     }
@@ -156,7 +248,9 @@ FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
         al <- names(ax)
         if(is.character(ann) && length(ann) >= length(al))
             al <- ann[al]
-        ann <- annotate("text", x=ax, y=ay, label=al, hjust=1, vjust=.5)
+        ann <- annotate("text", x=ax, y=ay, label=al, hjust=.5, vjust=.5,
+                        na.rm=TRUE)
+        ## "na.rm = TRUE" handles empty classes due to merging
     }
     else
         ann <- NULL
@@ -168,7 +262,7 @@ FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
     }
     else
     {
-        geo <- geom_point(aes(color=z), alpha=mean(a))
+        geo <- geom_point(aes(color=z, shape=zsh), alpha=mean(a))
     }
     g <- ggplot(mapping=aes(x, y)) + geo
     g <- g + csz + crd + c2d + ann
@@ -179,8 +273,9 @@ FIG$xoy <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
 }
 
 ## histogram
-FIG$hst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0)
+FIG$hst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL)
 {
+    ttl %:-% ""
     x <- if(fxy) y else x   # y as x?
     pdt <- .fd(x, z=z, a=a) # plot data
     map <- aes(x=x)         # main aesthetics
@@ -224,11 +319,12 @@ FIG$dst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
                     xlb=NULL, ylb=NULL, dlb=NULL)
 {
     ## -------------------------- retain symbols --------------------------- ##
-    X %:-% names(eval(call("DF", substitute(x), check.names=0), parent.frame()))
-    Y %:-% names(eval(call("DF", substitute(y), check.names=0), parent.frame()))
+    X %:-% names(eval(call("DF", substitute(x)), parent.frame()))
+    Y %:-% names(eval(call("DF", substitute(y)), parent.frame()))
     ## -------------------------- fix data objects ------------------------- ##
     upk(.fd(x, y, z, a)) # unpack fixed x, y, z, and a
     ## ---------------------------- make figure ---------------------------- ##
+    ttl %:-% ""
     crd <- NULL
     if(fxy) # flip x and y?
     {
@@ -264,17 +360,27 @@ FIG$dst <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue",
 #' @param y (not used).
 #' @param z class label.
 #' @param zcl color scale for class label.
-FIG$bar <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="hue")
+FIG$bar <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL,
+                    zcl="hue", xlb = NULL, ylb=NULL, pfm=NULL)
 {
-    x <- if(fxy) y else x                    # y as x?
-    a <- if(is.null(a)) 1 else a             # alpha
-    pdt <- .fd(x, z=z, a=a)                  # plot data
-    map <- aes(x=z)                          # aesthetics
-    crd <- if(fxy) coord_flip() else NULL    # coordinate
-    a <- mean(pdt$a)                         # alpha of all bars
+    ## x <- if(fxy) y else x                    # y as x?
+    ## a <- if(is.null(a)) 1 else a             # alpha
+    ## pdt <- .fd(x, z=z, a=a)                  # plot data
+    ## a <- mean(pdt$a)                         # alpha of all bars
+    upk(.fd("0", "0", z, a))
+    ttl %:-% ""
+    pfm %:-% ifelse(fxy, "# (%)", "#\n%")
     
-    ## counts, proportions, labels, and annotations
-    num <- with(pdt, table(z))
+    ## coordinate flip
+    crd <- NULL
+    if(fxy)
+    {
+        crd <- coord_flip()
+        ## z <- factor(z, rev(levels(z)))
+    }
+    
+    ## plotting data for counts, proportions, and percentages
+    num <- table(z)
     prp <- proportions(num, margin=NULL)
     num <- as.data.frame(num, responseName="num") |> na.omit()
     prp <- as.data.frame(prp, responseName="prp") |> na.omit()
@@ -282,40 +388,73 @@ FIG$bar <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, z
     {
         cnt <- local(
         {
-            pct <- sprintf("%.0f%%", prp * 100)
-            pct[prp < 0.01] <- "<1%" # small %
+            ## pct <- sprintf("%.0f%%", prp * 100)
+            hid <- prp < 0.01 # small values will be hidden
+            pct <- format(sprintf("%.0f%%", prp * 100))
             num <- format(num, trim=TRUE, big.mark=",")
-            sprintf(ifelse(fxy, "%s(%s)", "%s\n%s"), num, pct)
+            prp <- format(round(prp, 2))
+            lbl <- rep(pfm, length(pct))
+            for(. in seq_along(lbl))
+            {
+                lbl[.] <- sub("#", num[.], lbl[.], fixed=TRUE) # "#" -> num
+                lbl[.] <- sub("%", pct[.], lbl[.], fixed=TRUE) # "%" -> pct
+                lbl[.] <- sub(".", prp[.], lbl[.], fixed=TRUE) # "." -> prp
+            }
+            lbl[hid] <- ""
+            lbl
         })
-        lbl <- dct[match(levels(z), names(dct), 0)] # export only
     })
+
+    ## customized y-axis breaks (counts) and labels
+    ysc_lmt <- function(l, ...)
+    {
+        e <- l + diff(l) * c(-0.05, +0.05)            # default expansion
+        b <- labeling::extended(e[1], e[2], m=5, ...) # default breaks
+        ## is the upper limit too close to the last break?
+        if(abs(e[2] - max(b)) / diff(b)[1] < 0.05)
+            l[2] <- l[2] + diff(b)[1] * 0.1 # grow the limit a bit
+        l
+    }
+    ysc_lbl <- function(b, ...) # show numbers as K, M, B, and T
+    {
+        U <- 10^c(K=3, M=6, B=9, T=12) # number unit
+        u <- U[which.max(max(b, na.rm=TRUE) >= U)] # choose unit
+        sprintf("%s%s", format(b / u), names(u))
+    }
     
     ## plot elements
     ymx <- with(pdt, max(num)) # y-axis top
     if(!is.null(z))
     {
-        map <- c(map, aes(x=z, y=num, fill=z))
-        fcl <- .cs(z, zcl, "fill") # fill by z (labels)
-        geo <- geom_col(alpha=a, linewidth=1)
+        map <- aes(x=z, y=num, fill=z) #
+        ## csz <- .cs(z, zcl, "fill", dir=ifelse(fxy, -1, 1)) # fill by z (labels)
+        csz <- .cs(z, zcl, "fill") # fill by z (labels)
+        geo <- geom_col(alpha=mean(a), linewidth=1)
     }
     else
     {
-        fcl <- NULL
-        geo <- geom_col(alpha=a, linewidth=1, fill="gray50")
+        map <- aes(x=z) # aesthetics
+        csz <- NULL
+        geo <- geom_col(alpha=mean(a), linewidth=1, fill="gray50")
     }
-
+    
     ## annotation and text
-    lbl <- with(pdt, dct[match(levels(z), names(dct), 0)])
-    lbl <- annotate("text", x=names(lbl), y=ymx, label=lbl, hjust=1, vjust=.5,
-                    angle=90 * (1 - fxy), lineheight=.8)
+    ann <- NULL
+    if(length(dct) && dct != "0")
+    {
+        mis <- levels(z)[!levels(z) %in% names(dct)] # missed entry
+        names(mis) <- mis
+        ann <- c(dct[levels(z) %in% names(dct)], mis)[levels(z)]
+        ann <- annotate("text", x=names(ann), y=ymx, label=ann, hjust=1, vjust=.5,
+                        angle=90 * (1 - fxy), lineheight=.8, family="mono")
+    }
     txt <- geom_text(aes(label=cnt, y=0), hjust=0.5 * (1 - fxy), vjust=0.5 * fxy,
-                     lineheight=.8)
-                     ## angle=90 * (1 - fxy), lineheight=.8)
-    class(map) <- "uneval"
+                     lineheight=.8) # , angle=90 * (1 - fxy))
     ## ---- make figure ----
-    g <- ggplot(pdt, map) + fcl + crd
-    g <- g + geo + lbl + txt
-    g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
+    g <- ggplot(pdt, map) + csz + crd
+    g <- g + geo + ann + txt
+    g <- g + scale_y_continuous(limits=ysc_lmt, labels=ysc_lbl)
+    g <- g + labs(x=xlb, y=ylb, fill=NULL, title=ttl) + guides(alpha="none")
     g <- g + .th(lgp)
     ## print
     invisible(g)
@@ -327,12 +466,12 @@ FIG$bar <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, z
 #' @param x values (i.e., loading for PC1).
 #' @param y values (i.e., loading for PC2).
 #' @param z group label (not used)
-FIG$clp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="bs2")
+FIG$clp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="bs2", tsz=NULL)
 {
     if(is.null(names(x)))
-        names(x) <- sprintf("X%02X", seq_along(x))
+        names(x) <- seq_along(x)
     if(is.null(names(y)))
-        names(y) <- sprintf("Y%02X", seq_along(y))
+        names(y) <- seq_along(y)
     x <- if(fxy) y else x                    # y as x?
     ## specially treated plot data
     if(is.numeric(z) && length(unique(z)) > 8)
@@ -341,6 +480,21 @@ FIG$clp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, z
         a <- 1.0
     pdt <- .fd(x=factor(names(x), names(x)), y=x, z=z, a=a)
 
+    ## labeling and annotation
+    ymx <- max(0, pdt$y, na.rm=TRUE)
+    ymn <- min(0, pdt$y, na.rm=TRUE)
+    if(!is.null(dct) && is.null(names(dct)))
+        names(dct) <- seq_along(dct)
+    ann <- with(pdt, dct[match(levels(x), names(dct), 0)])
+    ann <- annotate("text", x=names(ann), y=ymx, label=ann, family="mono",
+                    hjust=1, vjust=.5, angle=90 * (1 - fxy), lineheight=.8)
+    ann$aes_params$size <- tsz
+    ##
+    txt <- geom_text(aes(label=format(round(y, 2), digits=1), y=ymn),
+                     hjust=0.5 * (1 - fxy), vjust=0.5, angle=90 * (1 - fxy),
+                     lineheight=.8)
+    txt$aes_params$size <- tsz
+    
     ## figure elements
     map <- aes(x=x, y=y) # common aesthetics
     crd <- if(fxy) coord_flip() else NULL
@@ -349,19 +503,20 @@ FIG$clp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, dct=NULL, z
     if(!is.null(z))
     {
         map <- c(map, aes(fill=z))
-        fcl <- .cs(z, zcl, "fill") # fill by z (labels)
+        csz <- .cs(z, zcl, "fill") # fill by z (labels)
         geo <- geom_col(alpha=a, linewidth=1)
     }
     else
     {
-        fcl <- NULL
+        csz <- NULL
         geo <- geom_col(alpha=a, linewidth=1, fill="gray50")
     }
 
     class(map) <- "uneval"
     ## ---- make figure ----
-    g <- ggplot(pdt, map) + fcl + crd
-    g <- g + geo # + ann + txt
+    g <- ggplot(pdt, map) + csz + crd
+    g <- g + scale_x_discrete(labels=function(x) rep("", length(x)))
+    g <- g + geo + txt + ann
     g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
     g <- g + .th(lgp)
     ## print
@@ -400,12 +555,18 @@ FIG$bxp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue")
         c(n, q, m)
     })
     rpt <- with(rpt, cbind(z, data.frame(x)))
-    amd <- annotate("text", x=rpt[, 1], y=rpt[, "MED"], label=rpt[, "MED"],
-                    hjust=.5, vjust=0.5, lineheight=0.8)
     aq1 <- annotate("text", x=rpt[, 1], y=rpt[, "Q25"], label=rpt[, "Q25"],
-                    hjust=.5, vjust=1.0, lineheight=0.8)
+                    hjust=1.0 * (1 - fxy) + 1.0 * fxy,
+                    vjust=1.0 * (1 - fxy) + 1.0 * fxy,
+                    lineheight=0.8)
+    amd <- annotate("text", x=rpt[, 1], y=rpt[, "MED"], label=rpt[, "MED"],
+                    hjust=1.0 * (1 - fxy),
+                    vjust=0.0 * (1 - fxy) + 1.0 * fxy,
+                    lineheight=0.8)
     aq3 <- annotate("text", x=rpt[, 1], y=rpt[, "Q75"], label=rpt[, "Q75"],
-                    hjust=.5, vjust=0.0, lineheight=0.8)
+                    hjust=1.0 * (1 - fxy) + 0.0 * fxy,
+                    vjust=0.0 * (1 - fxy) + 0.0 * fxy,
+                    lineheight=0.8)
 
     ## ---- make figure ----
     g <- ggplot(pdt, map) + fcs + lcs + crd
@@ -419,47 +580,106 @@ FIG$bxp <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, zcl="hue")
 
 #' proportions of class z given x (mosasics)
 #'
-#' Proportion of levels in {z} across levels in {x}
+#' Show proportions of categories in `z` given the conditions in `x`.
 #'
+#' @param x conditions such as age group for n samples
+#' @param y (unused)
+#' @param z categories such as disease  status for n samples
 #' @param xcl x-color scheme (conditions)
 #' @param zcl z-color scheme (categories)
-FIG$pzx <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, xcl="hue", zcl="hue", ...)
+#' @param xlb y-label for the conditions axis.
+#' @param ylb y-label for the proportion axis.
+#' @param pfm text format to show in the bars (def="#(%)").
+#'
+#' Useful to display conditional probabilities.
+#'
+#' `lgp` specifies the position of legend,  can be of c("none", "left", "right",
+#' "bottom", "top") outside of the plotting area,  or two numbers from c(0, 0) -
+#' bottom-left to c(1, 1) top-right inside of the plotting area.
+#'
+#' The text format `pfm` is a string with special character "#", "."  and "%" to
+#' represent numbers,  proportions, and percentages.  For  example, "#(%)" shows
+#' "1,234(12%)" in the bar, and "#[.]" shows "1,234[0.12]".
+#'
+#' Currently, proportions are  rounded up to two digits past  decimal point, and
+#' percentages are round to intergers;  proportions (percentages) less than 0.01
+#' (1%) are not printed.
+FIG$pzx <- function(x, y=NULL, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL,
+                    xlb=NULL, ylb=NULL, xcl=NULL, zcl="hue",
+                    pfm=NULL, ...)
 {
-    x <- if(fxy) y else x    # y as x?
-    crd <- if(fxy) coord_flip() else NULL
-    ## plot data
-    pdt <- .fd(x, y, z, a)
-    a <- if(is.null(a)) mean(pdt$a) # alpha of all bars
+    ## -------------------------- retain symbols --------------------------- ##
+    X %:-% names(eval(call("DF", substitute(x)), parent.frame()))
+    Y %:-% names(eval(call("DF", substitute(y)), parent.frame()))
+    ## -------------------------- fix data objects ------------------------- ##
+    upk(.fd(x, y, z, a)) # unpack fixed x, y, z, and a
+    ## ---------------------------- make figure ---------------------------- ##
+    ttl %:-% ""
+    xcl %:-% "1"
+    crd <- NULL
+    if(fxy) # flip x and y?
+        crd <- coord_flip()
+    xlb %:-% X # symbol/header of conditions as default x-axis title
+    ylb %:-% Y # symbol/header of y as default y-axis title
+    csx <- .cs(x, xcl, "color") # , dir=ifelse(fxy, 1, -1)) # color to draw
+    csz <- .cs(z, zcl, "fill")  # , dir=ifelse(fxy, 1, -1)) # color to fill
+    ## csz$guide <- guide_legend(reverse = TRUE, direction = "horizontal")
     
     ## counts, proportions, and labels
-    num <- with(pdt, table(x, z))
-    prp <- proportions(num, margin = 1) # race by label
+    pfm %:-% "#(%)"
+    num <- table(x, z)
+    prp <- proportions(num, margin = 1) # prop of [x] by [z]
     num <- as.data.frame(num, responseName="num") |> na.omit()
     prp <- as.data.frame(prp, responseName="prp") |> na.omit()
     pdt <- within(merge(num, prp), # prop and %
     {
         cnt <- local(
         {
-            pct <- sprintf("%.0f%%", prp * 100)
-            pct[prp < 0.01] <- "<1%" # small %
+            ## pct <- sprintf("%.0f%%", prp * 100)
+            hid <- prp < 0.01 # small values will be hidden
+            pct <- format(sprintf("%.0f%%", prp * 100))
             num <- format(num, trim=TRUE, big.mark=",")
-            sprintf(ifelse(fxy, "%s\n%s", "%s(%s)"), num, pct)
+            prp <- format(round(prp, 2))
+            lbl <- rep(pfm, length(pct))
+            for(. in seq_along(lbl))
+            {
+                lbl[.] <- sub("#", num[.], lbl[.], fixed=TRUE) # "#" -> num
+                lbl[.] <- sub("%", pct[.], lbl[.], fixed=TRUE) # "%" -> pct
+                lbl[.] <- sub(".", prp[.], lbl[.], fixed=TRUE) # "." -> prp
+            }
+            lbl[hid] <- ""
+            lbl
         })
     })
     
-    ## figure elements
-    map <- aes(x=x, y=prp, color=x, fill=z) # aesthetics
-    fcs <- FIG$.cs(z, zcl, "fill")          # fill colours: z-class
-    lcs <- FIG$.cs(x, xcl, "colour")        # line colours: x-class
-    geo <- geom_col(aes(alpha=a), position=position_stack(reverse=1), linewidth=1)
-    txt <- geom_text(aes(label=cnt), color="black",
-                     position=position_stack(vjust=0.5, reverse=1), lineheight=0.8)
+    ## y-scale labeler
+    ysc_lbl <- function(b, ...)
+    {
+        b <- sprintf("%.0f", b * 100)
+        b[1] <- paste0(b[1], "(%)")
+        b
+    }
+
+    ## x-scale and x-color-scale
+    if(any(grepl("discrete", class(csx), TRUE)))
+        s_x <- scale_x_discrete(drop=FALSE)
+    else
+        pdt <- within(pdt, x <- as.numeric(x))
+
+    map <- aes(x=x, y=prp, fill=z) # aesthetics
+    if(xcl != "0")
+        map <- c(map, aes(color=x))
     class(map) <- "uneval"
+    geo <- geom_col(alpha=mean(a), width=0.80, position=position_stack(reverse=fxy),
+                    linewidth=rel(1.5))
+    txt <- geom_text(aes(label=cnt), color="black",
+                     position=position_stack(vjust=0.5, reverse=fxy), lineheight=0.8)
     ## 
     g <- ggplot(pdt, map)
-    g <- g + geo + txt + crd + fcs + lcs
-    g <- g + scale_x_discrete(drop=FALSE)
-    g <- g + labs(x=NULL, y=NULL, fill=NULL, title=ttl) + guides(alpha="none")
+    g <- g + geo + txt + crd + csx + csz
+    g <- g + scale_y_continuous(labels=ysc_lbl)
+    g <- g + labs(x=xlb, y=ylb, fill=NULL, title=ttl)
+    g <- g + guides(alpha="none", color="none")
     g <- g + .th(lgp)
     ## return
     invisible(g)
@@ -474,8 +694,7 @@ FIG$pzx <- function(x, y, z=NULL, a=NULL, lgp=NULL, fxy=0, ttl=NULL, xcl="hue", 
 #' @param y data frame to identify entries (def=NULL, each row is an entry).
 #' @param z vector of row labels that affects color (def=NULL, no color).
 #' @param a alpha of table background transparency (def=0.3).
-FIG$tbp <- function(x, y=NULL, z=NULL, a=0.3)
-{
+FIG$tbp <- function(x, y=NULL, z=NULL, a=0.3) {
     stopifnot(NROW(x) == NROW(y) || length(y) == 0)
     stopifnot(NROW(x) == NROW(z) || length(z) == 0)
     ## data enchancement
@@ -603,6 +822,7 @@ FIG$orp <- function(x, y=NULL, z=NULL, a=NULL, cap=NULL, lgp=NULL)
 FIG$.tbp. <- function(x, y=NULL, z=NULL)
 {
     ## data enchancement
+    library(reshape2)
     x <- format(as.data.frame(x, check.names=FALSE), justify="l", big.mark=",")
     dat <- DF(y, z, x)
     dat <- melt(dat, id.vars=1:2, variable.name="x", value.name="v")
@@ -653,11 +873,11 @@ FIG$lgz <- function(x, y, z=NULL, a=NULL, fxy=0, ttl=NULL, dct=NULL, zcl="hue")
 
     ## plot elements
     map <- c(map, aes(x=0, y=0, fill=z))
-    fcl <- .cs(z, zcl, "fill", dct) # fill by z (labels)
+    csz <- .cs(z, zcl, "fill", dct) # fill by z (labels)
     geo <- geom_col(alpha=a, linewidth=1)
     class(map) <- "uneval"
     ## ---- make figure ----
-    g <- ggplot(pdt, map) + fcl + crd
+    g <- ggplot(pdt, map) + csz + crd
     g <- g + geo
     g <- g + labs(x=NULL, y=NULL, fill=ttl, title=NULL) + guides(alpha="none")
 
@@ -711,6 +931,6 @@ FIG$gsv <- function(g, out=NULL, dim=NULL, rsz=NULL, dpi=NULL, new=0, bg=NULL, .
 
 if("TCOM:FIG" %in% search())
     detach("TCOM:FIG")
-attach(FIG, name="TCOM:FIG", warn.conflicts = TRUE)
+attach(FIG, name="TCOM:FIG", warn.conflicts = FALSE)
 FIG$col <- FIG$clp
 ## rm(FIG)

@@ -2,27 +2,34 @@
 CNS <- new.env()
 
 #' abberivations in 3 letters
-CNS$GLOSSARY <- 
+CNS$GLOSSARY <- local(
 {
     nfo <- c(
-        CID = "client: unique client id.",
-        UCN = "client: unique client number.",
-        SEX = "client: sex-male/female, trans-male/female.",
-        RAC = "client: race (EUR:White, AFR:Black, NAT:Native, ASN:Asian, RMX:mixed)",
-        ETH = "client: ethnicity (NSP:None-Hispanic, HSP:Hispanic)",
-        AOE = "client: age of enrollment",
-        DOE = "client: date of enrollment",
-        LOS = "client: total length of stay.",
-        NVS = "client: number of assessment.",
-        AOA = "visits: age  of assessment.",
-        DOA = "visits: date of assessment.",
-        DYS = "visits: days since enrollment.",
-        BTW = "visits: days between visits (days since previous visit).",
-        FVC = "visits: for-ward visit counter.",
-        BVC = "visits: backword visit counter.",
-        RSD = "visits: residence when assessed.")
-    nfo
-}
+        CID = "(cli) client id.",
+        UCN = "(cli) unique client number.",
+        SEX = "(cli) sex (SXM/F:male/female, TSM/F:trans-male/female.)",
+        RAC = "(cli) race (EUR:White, AFR:Black, NAT:Native, ASN:Asian, OTH:Other)",
+        ETH = "(cli) ethnicity (NSP:None-Hispanic, HSP:Hispanic)",
+        DOB = "(cli) date of birth",
+        YOB = "(cli) year of birth",
+        AOE = "(cli) age of enrollment (numerical)",
+        DOE = "(cli) date of enrollment",
+        YOE = "(cli) year of enrollment",
+        LOS = "(cli) length of stay so far.",
+        NVS = "(cli) number of assessment so far.",
+        AGE = "(cli) age group (cohort).",
+        AYE = "(cli) age in years (cohort)",
+        AID = "(asc) assessment id.",
+        AOA = "(asc) age of assessment.",
+        DOA = "(asc) date of assessment.",
+        YOA = "(asc) year of assessment.",
+        DYS = "(asc) days since enrollment.",
+        BTW = "(asc) days between visits (days since previous visit).",
+        FVC = "(asc) for-ward visit counter.",
+        BVC = "(asc) backward visit counter.",
+        RSD = "(asc) residence when assessed.")
+    format(nfo, align="left")
+})
 CNS$GLS <- CNS$GLOSSARY
 
 #' add client-wise visit count to assessment meta-data.
@@ -30,16 +37,14 @@ CNS$GLS <- CNS$GLOSSARY
 #' @param cid client ID
 #' @param doa date of assessments.
 #' @return data.frame of visit counters
-CNS$visits <- function(cid, doa)
-{
+CNS$visits <- function(cid, doa) {
     idx <- order(cid, doa) # for each client, sort by DoA.
     doa <- doa[idx]
     cid <- cid[idx]
     org <- as.Date(doa[1])            # origin of date
     idx <- seq_along(idx)[order(idx)] # restore order
     ## calculate vists
-    lst <- lapply(split(as.Date(doa), cid), function(d)
-    {
+    lst <- lapply(split(as.Date(doa), cid), function(d) {
         nvs <- length(d)      # number of visits
         fvc <- 1:nvs          # forward visit
         bvc <- nvs:1          # backward visit
@@ -50,7 +55,8 @@ CNS$visits <- function(cid, doa)
         cbind(nvs=nvs, fvc=fvc, bvc=bvc, doe=doe, btw=btw, dys=dys, los=los)
     })
     ## compile, restore date, restore order, and return
-    lst <- as.data.frame(do.call(rbind, lst), row.names=cid %:% doa)
+    lst <- as.data.frame(do.call(rbind, lst), row.names=cid %:% doa,
+                         check.names=FALSE)
     lst <- within(lst,
     {
         doe <- as.Date(doe - doe[1], origin=org)
@@ -58,6 +64,12 @@ CNS$visits <- function(cid, doa)
     lst
 }
 CNS$vst <- CNS$visits
+CNS$fvc <- function(cid, doa) {
+    unsplit(lapply(split(as.Date(doa), cid), order, decreasing=FALSE), cid)
+}
+CNS$bvc <- function(cid, doa) {
+    unsplit(lapply(split(as.Date(doa), cid), order, decreasing=TRUE),  cid)
+}
 
 #' Group assessments in short periods to enforce minimum separation in days.
 #'
@@ -75,15 +87,14 @@ CNS$vst <- CNS$visits
 #' About the return types
 #' - 0 = begin_date - : - the earlist date of a group of assessment
 #' - 1 = group_date - grouped_date (default)
-CNS$msp <- function(cid, doa, msp=30, ret=1)
-{
+CNS$msp <- function(cid, doa, msp=30, ret=1) {
     idx <- order(cid, doa) # for each client, sort by DoA.
     doa <- doa[idx]
     cid <- cid[idx]
     idx <- seq_along(idx)[order(idx)] # restore order
     ## groups
     btw <- xgf(as.Date(doa), cid, xdf)
-    msk <- cid %:% SP("%03X", xgf(btw > MSP, cid, cumsum))
+    msk <- cid %:% SP("%03X", xgf(btw > msp, cid, cumsum))
     bgn <- xgf(doa, msk, `[`, 1)      # begin data
     prd <- cid %:% bgn                # periods
     ## return
@@ -116,15 +127,36 @@ CNS$msp <- function(cid, doa, msp=30, ret=1)
 #'
 #' @param val N x P matrix of CANS ratings.
 #' @param msk N x 1 vector of CANS assessment group mask.
-CNS$vmx <- function(val, msk, nlv=4)
-{
+CNS$vmx <- function(val, msk, nlv=4) {
     ret <- 0L # ratings
-    ret <- ret + (rowsum(0L + (val > 0L), msk, na.rm=TRUE) > 0L)
-    ret <- ret + (rowsum(0L + (val > 1L), msk, na.rm=TRUE) > 0L)
-    ret <- ret + (rowsum(0L + (val > 2L), msk, na.rm=TRUE) > 0L)
+    ret <- ret + (rowsum(0L + (val > 0L), msk, na.rm=TRUE) > 0L) # CANS = 1
+    ret <- ret + (rowsum(0L + (val > 1L), msk, na.rm=TRUE) > 0L) # CANS = 2
+    ret <- ret + (rowsum(0L + (val > 2L), msk, na.rm=TRUE) > 0L) # CANS = 3
+    ret <- ret + (rowsum(0L + (val > 3L), msk, na.rm=TRUE) > 0L) # FAST = 4
     ret[!rowsum(1 - is.na(val), msk)] <- NA
     ret
 }
+
+#' CANS to Actionable.
+#'
+#' Dichotomize CANS rating in 0-4 to actionable item rating in 0/1.
+#'
+#' Compatable with items of only two levels (e.g., traumatic experience).
+CNS$c2a <- function(x) {
+    if(idf <- is.data.frame(x)) {
+        x <- as.matrix(x)
+        x <- matrix(as.integer(x), nrow(x), ncol(x), dimnames=dimnames(x))
+    }
+    msk <- is.na(x)
+    x[msk] <- 0L
+    x <- apply(x, 2, function(a) 0 + (a > max(a) / 2))
+    x[msk] <- NA
+    if(idf) {
+        x <- as.data.frame(x)
+    }
+    x
+}
+
 
 #' summary by classes and domains.
 #'
@@ -140,8 +172,7 @@ CNS$vmx <- function(val, msk, nlv=4)
 #' @param clz N x 1 vector of M-classes over N reads.
 #' @param dmn P x 1 vector of Q-domains over P items.
 #' @param LVL L x 1 vector of L-tiers of rating (def=auto).
-CNS$scd <- function(val, clz, dmn, LVL=NULL)
-{
+CNS$scd <- function(val, clz, dmn, LVL=NULL) {
     clz <- factor(clz)    # M classes over N reads
     dmn <- factor(dmn)    # Q domains over P items
     val <- as.matrix(val) # L levels of ratings
@@ -168,8 +199,7 @@ CNS$scd <- function(val, clz, dmn, LVL=NULL)
 #' @param x age in years
 #' @param drop drop empty groups (def=1)
 #' @return a R factor of age groups.
-CNS$yag <- function(x, drop=1)
-{
+CNS$yag <- function(x, drop=1) {
     ## group age of enrollment / assessment
     lvl <- c("<0DAY"=-1, "0M-1Y"=1, "1Y-5Y"=5, "6Y-8Y"=8, "9Y-12"=12,
              "13-17"=17, "18-21"=21, "22Y&+"=Inf)
@@ -178,7 +208,6 @@ CNS$yag <- function(x, drop=1)
         x <- factor(x)
     x
 }
-
 
 if("TCOM:CNS" %in% search())
     detach("TCOM:CNS")
