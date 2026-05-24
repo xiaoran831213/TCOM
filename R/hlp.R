@@ -459,18 +459,30 @@ HLP$y2q <- function(x) {
 #' @param few how many elements to preview (def=4)
 #' @param len maximum word character length to preview (def=10).
 #' @param nas na-strings, def=c("", "NA", "N/A", "NULL").
-HLP$wck <- function(dat, few=4, len=10, nas=NULL) {
-    if(is.null(nas))
-        nas <- c("", "NA", "N/A", "NULL", NA)
+HLP$wck <- function(dat, few=4, len=10, nas=c(NA, NaN, "", "N/A", "NULL"),
+                    msg=0) {
+    ## missingness patterns
+    if(is.null(nas)) {
+        nas <- c(NA, NaN, "", "N/A", "NULL")
+    }
+    nas <- unique(paste0(nas)) # turn Inf, NaN and NA to strings
+    NAS <- sprintf("(?i)^\\s*(%s)\\s*$", paste0(nas, collapse = "|"))
+    ## class codes
     CLS <- c(character="C", numeric="N", double="N", integer="I",
              Date="T", logical="B", factor="F")[sapply(dat, class)]
-    rpt <- sapply(dat, \(x) {
-        ## v <- iconv(a, "latin1", "UTF-8")
-        v <- as.character(x)
-        v <- v[!(is.na(v) | toupper(enc2native(v)) %in% nas)] # non-NA
-        Encoding(v) <- "bytes"
+    rpt <- list()
+    for(j in seq_len(ncol(dat))) {
+        tic <- proc.time()
+        n <- colnames(dat)[j]
+        x <- dat[, j]
+        v <- paste0(x) # NaN/NA/Inf as strings
+        ## count and handle error encodings
+        err <- c(ERR=sum(is.na(iconv(v))) - sum(is.na(v)))
+        v <- iconv(v, sub="?")
+        v <- v[!grepl(NAS, v)] # drop string typed NA
+        Encoding(v) <- "bytes" # treat data as bytes
         ## prop of missing
-        pms <- c(PMS = round((length(x) - length(v)) / length(x), 3))
+        pms <- c(PMS = (length(x) - length(v)) / length(x))
         ## word sizes summary
         ## QSZ <- c(LMN=0, LQ1=1, LMD=2, LQ3=3, LMX=4) / 4 # min, q1, med, q3, max
         QSZ <- c(LMN=0, LMD=1, LMX=2) / 2 # min, med, max
@@ -481,9 +493,16 @@ HLP$wck <- function(dat, few=4, len=10, nas=NULL) {
         ## preview a few unique values, truncated
         val <- substr(v, 1, len) |> unique() |> rep(length.out=few)
         names(val) <- sprintf("x%02d", 1:few)
-        c(wsz, nux, pms, val)
-    }) |> t()
-    data.frame(CLS, rpt, check.names=FALSE)
+        ##
+        rpt[[n]] <- data.frame(c(wsz, nux, pms, err, as.list(val)))
+        tok <- proc.time()
+        if(msg > 0) {
+            lps <- (tok - tic)[3]
+            MSG <- sprintf("[%4d/%4d] %6.3fs: %s", j, ncol(dat), lps, n)
+            cat(MSG, "\n", sep="")
+        }
+    }
+    data.frame(CLS, do.call(rbind, rpt), row.names=colnames(dat))
 }
 
 #' overlap check
