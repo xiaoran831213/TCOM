@@ -79,7 +79,9 @@ HLP$cache <- function(.rds, .rxp, over=0, here=0, pack=0) {
     if(file.exists(.rds) && !over) {
         ret <- readRDS(.rds)
         .prt. <- attr(ret, "stdout")
-        cat(.prt., sep="\n")
+        if(length(.prt.)) {
+            cat(.prt., sep="\n")
+        }
     } else {
         .prt. <- capture.output({
             ret <- eval(substitute(.rxp), env, .out.)
@@ -157,7 +159,39 @@ formals(HLP$read.tsv)$na.strings=""
 HLP$readTSV <- HLP$read.tsv
 
 #' split vector x by group g, apply function f, then unsplit.
-HLP$xgf <- function(x, g, f, ...) unsplit(lapply(split(x, g), f, ...), g)
+HLP$xgf <- function(dat, grp, FUN, ...) {
+    ## fortify the data and grouping criteria
+    if(!is.factor(grp)) {
+        grp <- factor(grp, unique(grp))
+    }
+    LEN <- length(grp)           # common length of output
+    non <- rep(NA_integer_, LEN) # a hollow index or data
+    ## recursive call unless `dat` is a simple vector
+    if(is.list(dat)) {
+        for(. in seq_along(dat)) {
+            dat[[.]] <- xgf(dat[[.]], grp, FUN, ...)
+        }
+    } else if(is.matrix(dat)) {
+        for(. in seq_len(ncol(dat))) {
+            dat[, .] <- xgf(dat[, .], grp, FUN, ...)
+        }
+    } 
+    else {
+        if(length(dat) < 1L) { # accept empty input
+            dat <- non
+        }
+        if(length(dat) < LEN) { # cycle input
+            if(LEN %% length(dat) > 0L) {
+                warning("data not fully cycle group mask")
+            }
+            dat <- rep_len(dat, LEN)
+        }
+        res <- dat[non] ## hollow container of results
+        split(res, grp) <- lapply(split(dat, grp), FUN, ...)
+        dat <- res
+    }
+    dat
+}
 
 #' split {x} by {g}, tabluate unique values.
 #'
@@ -167,7 +201,7 @@ HLP$xgt <- function(x, g=NULL, na=NULL) {
     if(!is.factor(x))
         x <- factor(x, unique(x))
     r <- 0 + outer(x, levels(x), `==`)
-    r[is.na(x)] <- NA
+    r[is.na(x)] <- 0
     colnames(r) <- levels(x)
     rownames(r) <- names(x)
     if(!is.null(na) && na != FALSE) {
@@ -204,6 +238,148 @@ HLP$xdm <- function(x, useNA=0) {
     ##
     x <- cbind(x, `NA`=m)
     x
+}
+
+#' Dis-ambiguity by the most recent non-missing value per data unit.
+#' 
+#' When multiple records share the same unit identifier (`uid`), ambiguities may
+#' arise. This function resolves ambiguities by keeping, per-variable, per-unit,
+#' the latest non-missing  value according to the ordering specified  by a visit
+#' identifier (`vid`).
+#' 
+#' @param dat target to resolve ambiguities - convertable to a `data.frame`.
+#' @param uid Identifies the unit of  data. Records with the same `uid` could be
+#'     ambiguous and will be collapsed.
+#' @param vid Identifies the order  of records within each  unit. Higher values
+#'     are considered more recent. If `NULL` (default), the natural order within
+#'     each unit is used.
+#' @param verbose  Logical.  If `TRUE`,  prints the  names  of variables  being
+#'     resolved. Default is `FALSE`.
+#' @return A `data.frame` with one row  per unique `uid`. For each variable, the
+#'     value is the latest non-NA observation  from the ambiguous records (or NA
+#'     if none existed). Row names are formatted as `uid`.
+#'
+#' `dat` can be a `vector`, a `matrix`, a `list` of column-combinable objects, a
+#' `data frame`, or object convertable to a `data.frame`, where the rows will be
+#' scanned for ambiguities.
+#'
+#' `uid` and `vid` can  be names or numbers indexing the  columns in `dat`; both
+#' can also accept `data.frame` compatible form  like `dat` does, as long as the
+#' number of row in the `data.frame` converted form `uid` and `vid` matches that
+#' of `dat`.
+#' 
+#' If `vid`  is unspecified, the  sequence of records in  a unit is  the natural
+#' order within the said unit. If multiple  records in the same unit are tied by
+#' the highest `vid`, the last occurring record is taken to break the tie.
+#' 
+#' When `vid` contains missing values (`NA`), these records are treated as less
+#' recent than any record with a non-missing `vid`. Within a data unit, a record
+#' with missing `vid` will only contribute values if no record with a non-missing
+#' `vid` exists for that variable.
+#' 
+#' @examples
+#' # Medical diagnosis with multiple visits per patient
+#' medical_data <- read.table(text = "
+#'   CMH        DTM SCH PRI  SEC  TER
+#'  B603 2022-06-14   0 F43  F90   NA
+#'  B603 2022-03-15   0 F43   NA   NA
+#'  B603 2023-03-23  NA F43   NA   NA
+#'  A6D4 2023-03-23  NA F43   NA   NA
+#'  A6D4 2023-03-23   1 F43   NA   NA
+#'  B797 2023-03-23   2 F43  F84   NA
+#'  B7D7 2022-06-14   0 F84  F90  F33
+#'  B7D7 2022-03-15  NA F84  F90  F33
+#'  B7D7 2023-03-23   0 F84  F90   NA
+#'  B7D7 2023-03-23   0 F84   NA   NA
+#'  BA72 2024-03-04   3 F43  F32  F32
+#'  BA72 2024-03-04  NA F43  F32  F32
+#'  BA72 2023-11-24   3 F43  F32  F32
+#'  BA72 2023-11-24   3 F43  F32  F32
+#'  BC60 2024-03-04   1 F90  F43   NA
+#'  9C82 2022-03-01   2 F90  F84   NA
+#'  9C82 2022-03-15   2 F84  F90  F43
+#'  8D9F 2021-11-01   1 F32  F43   NA
+#'  BF9F 2022-06-14   1 F43   NA   NA
+#'  BF9F 2022-03-15   1 F43   NA   NA
+#'  BF9F 2023-03-23   2 F43   NA   NA
+#' ", header = TRUE, stringsAsFactors = FALSE, na.strings = "NA")
+#'
+#' # Resolve ambiguity by most recent update
+#' lnn(medical_data, uid = "CMH", vid = "DTM")
+#'
+#' # Handling missing visit dates (NA treated as least recent)
+#' data_with_na <- data.frame(
+#'   id = c(1, 1, 1),
+#'   visit_date = as.Date(c("2023-01-01", NA, "2023-06-01")),
+#'   diagnosis = c("A", "B", "C")
+#' )
+#' lnn(data_with_na, uid = "id", vid = "visit_date")
+#' # Returns diagnosis "C" (from 2023-06-01), not "B" (from missing date)
+HLP$lnn <- function(dat, uid, vid=NULL, verbose=FALSE, ...) {
+    ## ---------------------------- preparation ----------------------------- --
+    ## handle data - fortify it as an R data.frame
+    dat <- as.data.frame(dat)
+    ## handle unit ID
+    if(is.character(uid) && all(uid %in% names(dat))) {
+        uid <- dat[, uid, drop = FALSE] # from column names.
+    }
+    ## combinatory ID -> single string - remember order of appearance
+    uid <- as.data.frame(uid)
+    uid <- do.call(paste, c(uid, sep = ":"))
+    ooa <- unique(uid) # order of first appearance
+    ## handle visit ID
+    if(is.character(vid) && all(vid %in% names(dat))) {
+        vid <- dat[, vid, drop = FALSE] # from column names.
+    }
+    ## if null, treat the natural order of observation as visit ID
+    if(is.null(vid)) { 
+        vid <- unsplit(lapply(split(vid, uid), seq_along), uid)
+    }
+    ## combinatory ID -> single factor - preserve existing level ordering
+    vid <- as.data.frame(vid)
+    vid <- lapply(vid, \(x) if(is.factor(x)) x else factor(x))
+    vid <- do.call(interaction, c(vid, sep = ":", lex.order = TRUE))
+    
+    ## ----------------------------- resolution ----------------------------- --
+    ## take out data units with duplication in UID, which may have ambiguities.
+    m <- uid %in% unique(uid[duplicated(uid)])
+    d <- dat[m, , drop = FALSE]
+    s <- uid[m]
+    ## sort records in reverse order of the  time unit, then in reverse order of
+    ## the natural order, so (1) the latest records in each data unit are placed
+    ## first; (2) if multiple records are tied  in time, the last one by natural
+    ## ordering is placed first.
+    . <- order(vid[m], seq_along(s), decreasing=TRUE)
+    d <- d[., , drop = FALSE]
+    s <- s[.]
+    s <- factor(s, unique(s))
+    
+    ## dis-ambiguity by the last non-NA (or the first in reversed time order)
+    res <- list()
+    for(n in names(d)) {
+        res[[n]] <- tapply(d[[n]], s, \(.) .[!is.na(.)][1])
+        if(verbose) cat(n, "\n")
+    }
+    
+    ## ----------------------------- re-combine ----------------------------- --
+    ## combine part of data with ambiguity resolved with the rest of the data
+    dat <- rbind(dat[!m, , drop = FALSE], data.frame(res))
+    uid <- c(uid[!m], levels(s))
+    ## restore original order of appearance of data units
+    . <- match(ooa, uid)
+    dat <- dat[., , drop = FALSE]
+    uid <- uid[.]
+    ## return
+    rownames(dat) <- uid
+    dat
+}
+
+#' check relationship cardinality
+HLP$crd <- function(x, y, ...) {
+    unq <- unique(cbind(x, y))
+    b <- max(table(unq[, 1]))
+    a <- max(table(unq[, 2]))
+    paste0(a, ":", b)
 }
 
 #' code NA as N/A in a factor
