@@ -186,8 +186,9 @@ HLP$xgf <- function(dat, grp, FUN, ...) {
             }
             dat <- rep_len(dat, LEN)
         }
-        res <- dat[non] ## hollow container of results
-        split(res, grp) <- lapply(split(dat, grp), FUN, ...)
+        val <- lapply(split(dat, grp), FUN, ...)
+        res <- val[[1L]][non] ## hollow container of results
+        split(res, grp) <- val
         dat <- res
     }
     dat
